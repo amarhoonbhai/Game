@@ -32,10 +32,10 @@ current_game_state = {
 COINS_PER_GUESS = 10
 MAX_INCORRECT_GUESSES = 2
 
-# Function to fetch a random image from Nekos API
-def fetch_neko_image():
+# Function to fetch a random image from waifu.pics API
+def fetch_waifu_image():
     character_names = ["Naruto", "Sasuke", "Sakura", "Luffy", "Goku", "Vegeta", "Zoro", "Nami", "Hinata", "Kakashi"]
-    response = requests.get('https://nekos.life/api/v2/img/neko')
+    response = requests.get('https://api.waifu.pics/sfw/waifu')
     
     if response.status_code == 200:
         data = response.json()
@@ -133,7 +133,7 @@ def claim_bonus(message):
 # Function to reset the game state and send a new character image
 def send_new_character(chat_id):
     global current_game_state
-    image_url, character_name = fetch_neko_image()
+    image_url, character_name = fetch_waifu_image()
 
     if image_url and character_name:
         # Reset attempts for each user when a new character is shown
@@ -144,7 +144,7 @@ def send_new_character(chat_id):
         # Send the new image to the chat
         bot.send_photo(chat_id, image_url, caption=f"🎨 Guess the name of this anime character!")
     else:
-        # Error handling updated to "Characters are on the way"
+        # Error handling if the image couldn't be fetched
         bot.send_message(chat_id, "⚠️ Characters are on the way. Please wait...")
 
 # Function to handle guesses
@@ -179,6 +179,20 @@ def handle_guess(message):
                 # Warn the user about the incorrect guess
                 bot.reply_to(message, f"❌ Incorrect guess. You have {MAX_INCORRECT_GUESSES - attempts} attempts left.")
 
+# /help command - Lists all available commands
+@bot.message_handler(commands=['help'])
+def show_help(message):
+    help_message = """
+    🤖 Available Commands:
+    
+    /start - Start the game
+    /help - Show this help message
+    /redeem <code> - Redeem a valid code for coins
+    /bonus - Claim your daily reward (available every 24 hours)
+    🎮 Guess the name of anime characters from images!
+    """
+    bot.reply_to(message, help_message)
+
 # Start Command - Begins by sending the first character image
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -190,3 +204,4 @@ threading.Thread(target=generate_redeem_code, daemon=True).start()
 
 # Start polling the bot
 bot.infinity_polling()
+    
