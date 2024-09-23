@@ -17,6 +17,7 @@ redeem_code_expiry = None
 user_last_redeem = {}  # To track the last redeem time of each user
 user_last_bonus = {}   # To track the last bonus claim time of each user
 user_coins = {}  # Dictionary to track each user's coin balance
+user_chat_ids = set()  # Store all chat IDs for redeem code announcements
 message_counter = 0    # Counter for tracking messages
 
 # Coins awarded for redeeming, daily bonus, and correct guesses
@@ -98,8 +99,10 @@ def send_new_character(chat_id):
 # /start command - Starts the game
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
+    chat_id = message.chat.id
+    user_chat_ids.add(chat_id)  # Store user chat ID
     bot.reply_to(message, "Welcome to the Anime Character Guessing Game! Try to guess the character's name.")
-    send_new_character(message.chat.id)
+    send_new_character(chat_id)
 
 # /redeem command - Redeem coins with a valid redeem code
 @bot.message_handler(commands=['redeem'])
@@ -107,6 +110,9 @@ def redeem_coins(message):
     global current_redeem_code, redeem_code_expiry
     user_id = message.from_user.id
     username = message.from_user.username or message.from_user.first_name
+
+    # Store user chat ID for future announcements
+    user_chat_ids.add(message.chat.id)
 
     # Check if a redeem code is active
     if current_redeem_code is None or redeem_code_expiry is None or datetime.now() > redeem_code_expiry:
@@ -137,6 +143,9 @@ def redeem_coins(message):
 def claim_bonus(message):
     user_id = message.from_user.id
     username = message.from_user.username or message.from_user.first_name
+
+    # Store user chat ID for future announcements
+    user_chat_ids.add(message.chat.id)
 
     # Check if the user can claim the bonus (once per 24 hours)
     if can_claim_bonus(user_id):
@@ -210,8 +219,9 @@ def generate_redeem_code():
         current_redeem_code = generate_random_code()
         redeem_code_expiry = datetime.now() + timedelta(hours=1)
 
-        # Announce the new redeem code to each user (private message)
-        bot.send_message(chat_id=message.chat.id, text=f"🔑 New Redeem Code: {current_redeem_code}\nThis code is valid for 1 hour. Use /redeem <code> to claim coins!")
+        # Announce the new redeem code to all active users
+        for chat_id in user_chat_ids:
+            bot.send_message(chat_id=chat_id, text=f"🔑 New Redeem Code: {current_redeem_code}\nThis code is valid for 1 hour. Use /redeem <code> to claim coins!")
 
         # Wait for 1 hour before generating the next code
         time.sleep(3600)
