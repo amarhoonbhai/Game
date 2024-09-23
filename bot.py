@@ -9,7 +9,7 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 
 # Initialize Telegram Bot
-API_TOKEN = "7831268505:AAGH-KYpGjF8Qk8W819Sj4C9kWpWK0dLGes"  # Replace with your actual Telegram bot API token
+API_TOKEN = "7831268505:AAE6x1WHPJ-70AN-U6G4KXjwpe6rCdATJlg"  # Replace with your actual Telegram bot API token
 bot = telebot.TeleBot(API_TOKEN)
 
 # Function to fetch random anime characters from AniList API
