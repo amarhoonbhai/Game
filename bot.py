@@ -9,86 +9,73 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 
 # Initialize Telegram Bot
-API_TOKEN = "7831268505:AAE6x1WHPJ-70AN-U6G4KXjwpe6rCdATJlg"  # Replace with your actual Telegram bot API token
+API_TOKEN = "7831268505:AAFAwTBSkJrIcC9Aj9eGFzYRnPPQFk4pJmg"  # Replace with your actual Telegram bot API token
 bot = telebot.TeleBot(API_TOKEN)
 
-# Function to fetch random anime characters from AniList API
+# Jikan API URL for fetching characters
+JIKAN_API_URL = "https://api.jikan.moe/v4/characters"
+
+# Function to fetch a random anime character from Jikan API
 def fetch_random_anime_character():
-    url = 'https://graphql.anilist.co'
-    query = '''
-    query ($page: Int, $perPage: Int) {
-      Page(page: $page, perPage: $perPage) {
-        characters {
-          name {
-            full
-          }
-          media {
-            nodes {
-              title {
-                english
-                romaji
-              }
-            }
-          }
-        }
-      }
-    }
-    '''
-    variables = {'page': random.randint(1, 50), 'perPage': 1}  # Fetch random page of characters
     try:
-        response = requests.post(url, json={'query': query, 'variables': variables})
+        # Get a random page from the Jikan API (there are many characters available)
+        page = random.randint(1, 50)
+        response = requests.get(f"{JIKAN_API_URL}?page={page}")
         response.raise_for_status()
         data = response.json()
-        characters = data['data']['Page']['characters']
-        if len(characters) > 0:
-            return characters[0]  # Return the first character from the random page
+
+        # Select a random character from the returned list
+        characters = data['data']
+        if characters:
+            character = random.choice(characters)
+            character_name = character['name']
+            character_image = character['images']['jpg']['image_url']  # Character image
+            return {
+                'name': character_name,
+                'image': character_image
+            }
         else:
-            raise Exception("No characters found")
+            return None
     except requests.RequestException as e:
-        print(f"Error fetching character from AniList: {e}")
+        print(f"Error fetching character from Jikan API: {e}")
         return None
 
 # Start Command
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "Welcome to the Anime Character Guessing Game! Use /start_game to begin guessing characters.")
+    bot.reply_to(message, "Welcome to the Anime Character Guessing Game! Use /start_game to begin guessing characters by their image.")
 
-# Start Game Command - Sends a Random Anime Character
+# Start Game Command - Sends a Random Anime Character's Image
 @bot.message_handler(commands=['start_game'])
 def start_game(message):
     character = fetch_random_anime_character()
     if character is None:
         bot.reply_to(message, "Sorry, I couldn't fetch a character right now. Try again later.")
     else:
-        character_name = character['name']['full']
-        anime_title = character['media'][0]['title']['english'] if 'english' in character['media'][0]['title'] else character['media'][0]['title']['romaji']
+        character_name = character['name']
+        character_image = character['image']
+
+        # Store the character for this session
         bot.current_character = character_name.lower()
-        bot.current_hint = anime_title
-        bot.reply_to(message, f"Guess the anime character! Hint: This character is from {bot.current_hint}.")
+
+        # Send the character image and prompt the user to guess the name
+        bot.send_photo(message.chat.id, character_image, caption="Guess the name of this anime character!")
 
 # Guess Command - Validate the Guess and Send the Next Character Automatically
 @bot.message_handler(commands=['guess'])
 def guess(message):
     guess_text = message.text[len("/guess "):].lower()
-    user_id = message.from_user.id
 
+    # Check if the guess matches the current character's name
     if guess_text == bot.current_character:
-        # Correct guess, send a new character
+        # Correct guess
         bot.reply_to(message, f"Correct! The character was {bot.current_character.capitalize()}. Here's the next one:")
         
-        # Fetch a new character automatically
-        character = fetch_random_anime_character()
-        if character is None:
-            bot.reply_to(message, "Sorry, I couldn't fetch a new character right now. Try again later.")
-        else:
-            character_name = character['name']['full']
-            anime_title = character['media'][0]['title']['english'] if 'english' in character['media'][0]['title'] else character['media'][0]['title']['romaji']
-            bot.current_character = character_name.lower()
-            bot.current_hint = anime_title
-            bot.reply_to(message, f"Guess the anime character! Hint: This character is from {bot.current_hint}.")
+        # Fetch and send a new character automatically
+        start_game(message)
     else:
         # Wrong guess
-        bot.reply_to(message, f"Wrong guess! Try again.")
+        bot.reply_to(message, "Wrong guess! Try again.")
 
 # Run the bot
 bot.infinity_polling()
