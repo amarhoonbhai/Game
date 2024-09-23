@@ -201,9 +201,8 @@ def generate_redeem_code():
         current_redeem_code = generate_random_code()
         redeem_code_expiry = datetime.now() + timedelta(hours=1)
 
-        # Announce the new redeem code
-        bot.send_message(chat_id="YOUR_GROUP_ID",  # Replace with your group ID or broadcast to users
-                         text=f"🔑 New Redeem Code: {current_redeem_code}\nThis code is valid for 1 hour. Use /redeem <code> to claim coins!")
+        # Announce the new redeem code to each user (private message)
+        bot.send_message(chat_id=message.chat.id, text=f"🔑 New Redeem Code: {current_redeem_code}\nThis code is valid for 1 hour. Use /redeem <code> to claim coins!")
 
         # Wait for 1 hour before generating the next code
         time.sleep(3600)
