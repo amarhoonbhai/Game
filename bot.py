@@ -1,28 +1,33 @@
+import os
 import telebot
 import random
 import threading
 import time
-import requests
 from pymongo import MongoClient
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Retrieve values from .env
+API_TOKEN = os.getenv('TELEGRAM_BOT_API_TOKEN')
+MONGO_URI = os.getenv('MONGO_URI')
+LOG_CHANNEL_ID = int(os.getenv('LOG_CHANNEL_ID'))  # Ensure this is an integer
 
 # Initialize Telegram Bot
-API_TOKEN = "7579121046:AAFF2xYIk_HYpx9hmMOauNVRI9l42-f_7wk"  # Replace with your actual Telegram bot API token
 bot = telebot.TeleBot(API_TOKEN)
 
 # MongoDB Setup
-MONGO_URI = "mongodb+srv://philoamar825:FlashShine@cluster0.7ulvo.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"  # Replace with your MongoDB connection string
 client = MongoClient(MONGO_URI)
 db = client['anime_game']  # Database name
 characters_collection = db['characters']  # Collection for characters
 users_collection = db['users']  # Collection for users
+redeem_collection = db['redeem_codes']  # Collection for redeem codes
 
 # Define bot owner and sudo users
-bot_owner_id = "7222795580"  # Replace with your Telegram user ID
-sudo_users = "6180999156"  # Add other sudo user IDs if necessary
-
-# Define the log channel ID
-log_channel_id = "-1002438449944"  # Replace with your character/log channel ID
+bot_owner_id = "7222795580" # Replace with your Telegram user ID
+sudo_users = "7222795580" "6180999156"   # Add other sudo user IDs if necessary
 
 # Rarity levels
 RARITY_LEVELS = {
@@ -42,6 +47,10 @@ current_character = {
 # Track users and groups
 unique_users = set()
 unique_groups = set()
+
+# Generate a redeem code every hour
+current_redeem_code = None
+redeem_code_expiry = None
 
 # Track users and groups for statistics
 def track_user_and_group(message):
@@ -113,8 +122,8 @@ def upload_character(message):
 
         bot.reply_to(message, f"✅ Character '{name.capitalize()}' uploaded successfully with rarity: {rarity.capitalize()}")
 
-        # Log the character upload to the log channel
-        bot.send_message(log_channel_id, f"📥 A new character was uploaded:\nName: {name.capitalize()}\nRarity: {rarity.capitalize()}\nUploaded by: {message.from_user.first_name}")
+        # Send the character image and details to the log channel
+        bot.send_photo(LOG_CHANNEL_ID, image_url, caption=f"📥 A new character was uploaded:\nName: {name.capitalize()}\nRarity: {rarity.capitalize()}")
     else:
         bot.reply_to(message, "❌ Incorrect format. Use: /upload <image_url> <name> <rarity>")
 
@@ -135,113 +144,12 @@ Available commands:
 /redeem - Redeem coins (available every hour)
 /leaderboard - Show the leaderboard with top players
 /daily_reward - Claim your daily coins reward
+/redeem_code - Show current redeem code
 /help - Show this help message
 """
     bot.reply_to(message, help_message)
 
-# Send a random character to the chat
-def send_random_character(chat_id):
-    global current_character
-
-    character = get_random_character()
-    if not character:
-        bot.send_message(chat_id, "No characters have been uploaded yet. Please ask an admin to upload some.")
-        return
-
-    # Extract image_url, name, and rarity
-    image_url = character["image_url"]
-    name = character["name"]
-    rarity = character["rarity"]
-
-    # Assign rarity emoji
-    rarity_emoji = RARITY_LEVELS.get(rarity, '')
-
-    # Store the current character for future guessing
-    current_character["image_url"] = image_url
-    current_character["name"] = name
-    current_character["rarity"] = rarity
-
-    # Send the character image with an attractive caption
-    attractive_captions = [
-        f"✨ Behold! An {rarity.capitalize()} waifu has appeared! {rarity_emoji}",
-        f"💖 Feast your eyes on this beautiful {rarity.capitalize()} waifu! {rarity_emoji}",
-        f"🌟 A rare gem just for you! Here's an {rarity.capitalize()} waifu! {rarity_emoji}",
-        f"🔥 You’re lucky! An {rarity.capitalize()} character is here to charm you! {rarity_emoji}"
-    ]
-    caption = random.choice(attractive_captions)
-
-    # Send the image with the attractive caption
-    bot.send_photo(chat_id, image_url, caption=caption)
-
-    # Log this character to the log channel (without the URL)
-    bot.send_message(log_channel_id, f"Character displayed:\nName: {name.capitalize()}\nRarity: {rarity.capitalize()}")
-
-# Award coins and streak bonus for a correct guess
-def award_coins(user_id, username):
-    player = get_player_data(user_id, username)
-    
-    # Base coins for a correct guess
-    base_coins = 10
-    # Bonus coins for streak (5 coins per streak level)
-    streak_bonus = 5 * player["streak"]
-
-    # Update player's streak, coins, and correct guesses
-    player["streak"] += 1  # Increase streak
-    player["correct_guesses"] += 1  # Increase correct guesses
-    player["coins"] += base_coins + streak_bonus  # Add coins with bonus
-
-    # Save updated player data
-    update_player_data(user_id, coins=player["coins"], correct_guesses=player["correct_guesses"], streak=player["streak"])
-
-    # Notify the user of their reward
-    bot.reply_to(message, f"🎉 Congratulations {username}! You guessed correctly and earned {base_coins + streak_bonus} coins (Base: {base_coins} + Streak Bonus: {streak_bonus}). Total coins: {player['coins']} (Streak: {player['streak']})")
-
-# Reset streak on an incorrect guess
-def reset_streak(user_id):
-    if user_id in players_data:
-        update_player_data(user_id, streak=0)  # Reset the streak
-
-# Handle guesses from users
-@bot.message_handler(func=lambda message: True)
-def handle_guess(message):
-    global current_character
-
-    # Normalize guess text
-    guess_text = message.text.strip().lower()
-    user_id = message.from_user.id
-    username = message.from_user.username or message.from_user.first_name
-
-    if guess_text == current_character["name"]:
-        # Award coins and streak bonus for a correct guess
-        award_coins(user_id, username)
-        # Fetch and send a new character immediately after a correct guess
-        send_random_character(message.chat.id)
-    else:
-        bot.reply_to(message, "❌ Incorrect guess, try again!")
-        # Reset the player's streak on incorrect guess
-        reset_streak(user_id)
-
-# Redeem Command - Allows users to redeem coins every hour
-@bot.message_handler(commands=['redeem'])
-def redeem_coins(message):
-    user_id = message.from_user.id
-    username = message.from_user.username or message.from_user.first_name
-
-    # Get player data
-    player = get_player_data(user_id, username)
-    now = datetime.now()
-
-    # Check if the user has redeemed within the last hour
-    if player["last_redeem"] is None or (now - player["last_redeem"]) >= timedelta(hours=1):
-        # Award 20 coins for redeeming
-        new_coins = player["coins"] + 20
-        update_player_data(user_id, coins=new_coins, last_redeem=now)
-
-        bot.reply_to(message, f"🎉 You redeemed 20 coins! Total coins: {new_coins}")
-    else:
-        time_left = timedelta(hours=1) - (now - player["last_redeem"])
-        minutes_left = time_left.seconds // 60
-        bot.reply_to(message, f"⏳ You can redeem again in {minutes_left} minutes.")
+# More bot functionalities here...
 
 # Run the bot
 bot.infinity_polling()
