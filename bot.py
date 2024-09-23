@@ -6,15 +6,15 @@ import requests
 from datetime import datetime
 
 # Initialize Telegram Bot
-API_TOKEN = "7831268505:AAFdl5CI7fZ4RCfyyUf9_Aj3_GgnFTiloto"  # Replace with your actual Telegram bot API token
+API_TOKEN = "YOUR_TELEGRAM_BOT_API_TOKEN7831268505:AAH3GEv7xAU_ma4S23DAtJs43-GZ-MJROrU"  # Replace with your actual Telegram bot API token
 bot = telebot.TeleBot(API_TOKEN)
 
 # Define bot owner and sudo users
-bot_owner_id = "7222795580" # Replace with your Telegram user ID
+bot_owner_id = "7222795580"  # Replace with your Telegram user ID
 sudo_users = "6180999156" # Add other sudo user IDs if necessary
 
 # Define the log channel ID
-log_channel_id = "-1002438449944"  # Replace with your character/log channel ID
+log_channel_id = "-1002438449944" # Replace with your character/log channel ID
 
 # Track unique users and groups
 unique_users = set()
@@ -26,7 +26,6 @@ API_URLS = [
     "https://waifu.pics/api/sfw/waifu",  # Waifu.it API
     "https://api.waifu.im/sfw/waifu/",  # Waifu.im API
     "https://anime-api.com/api/characters/random",  # NPM Anime API
-    "https://api.anime-pictures.net/pictures/get_random",  # Anime Pictures API
 ]
 
 # Rarity levels
@@ -51,8 +50,6 @@ def fetch_random_image():
         return response.json().get("url")  # Waifu.im API returns image in "url" field
     elif "anime-api.com" in api_url:
         return response.json().get("image_url")  # NPM Anime API returns "image_url"
-    elif "anime-pictures.net" in api_url:
-        return response.json().get("picture")  # Anime Pictures API returns "picture"
     return None
 
 # Get a random rarity level
@@ -61,8 +58,8 @@ def get_random_rarity():
 
 # Log to the character database channel
 def log_character_to_channel(image_url, rarity):
-    # Send character details to the log channel
-    bot.send_message(log_channel_id, f"Character displayed:\nRarity: {rarity.capitalize()}\nImage URL: {image_url}")
+    # Send character details to the log channel (without the image URL)
+    bot.send_message(log_channel_id, f"A character has been displayed!\nRarity: {rarity.capitalize()}")
 
 # Track users and groups
 def track_user_and_group(message):
@@ -75,7 +72,7 @@ def track_user_and_group(message):
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     track_user_and_group(message)
-    bot.reply_to(message, "Welcome to the Anime Character Guessing Game! Characters will appear automatically.")
+    bot.reply_to(message, "Welcome to the Anime Character Guessing Game! Beautiful characters are about to appear!")
     # Automatically start sending images after 10 seconds
     threading.Thread(target=automatic_image_sending, args=(message.chat.id,)).start()
 
@@ -109,10 +106,19 @@ def send_random_character(chat_id):
     # Get random rarity
     rarity, emoji = get_random_rarity()
 
-    # Send the character image with rarity
-    bot.send_photo(chat_id, image_url, caption=f"Guess the name of this anime character! Rarity: {rarity.capitalize()} {emoji}")
+    # Send the character image with an attractive caption and rarity
+    attractive_captions = [
+        f"✨ Behold! An {rarity.capitalize()} waifu has appeared! {emoji}",
+        f"💖 Feast your eyes on this beautiful {rarity.capitalize()} waifu! {emoji}",
+        f"🌟 A rare gem just for you! Here's an {rarity.capitalize()} waifu! {emoji}",
+        f"🔥 You’re lucky! An {rarity.capitalize()} character is here to charm you! {emoji}"
+    ]
+    caption = random.choice(attractive_captions)
 
-    # Log this character to the log channel
+    # Send the image with the attractive caption
+    bot.send_photo(chat_id, image_url, caption=caption)
+
+    # Log this character to the log channel (without the URL)
     log_character_to_channel(image_url, rarity)
 
 # Stats Command - Only for bot owner and sudo users to see the number of users and groups
