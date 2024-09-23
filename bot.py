@@ -6,7 +6,7 @@ import requests
 from datetime import datetime, timedelta
 
 # Replace with your actual bot API token
-API_TOKEN = "7740301929:AAEmgvbFLpYJ0bRPAqxn5KkFhTiKn218g6k"  # Replace with your Telegram bot API token
+API_TOKEN = "7740301929:AAGNTPwQmCxzN4qzgnlnb2Rwg3dm7ZaHes4"  # Replace with your Telegram bot API token
 
 # Initialize Telegram Bot
 bot = telebot.TeleBot(API_TOKEN)
@@ -16,11 +16,14 @@ current_redeem_code = None
 redeem_code_expiry = None
 user_last_redeem = {}  # To track the last redeem time of each user
 user_last_bonus = {}   # To track the last bonus claim time of each user
+user_coins = {}  # Dictionary to track each user's coin balance
 message_counter = 0    # Counter for tracking messages
 
-# Coins awarded for redeeming and daily bonus
+# Coins awarded for redeeming, daily bonus, and correct guesses
 COINS_PER_REDEEM = 50
 COINS_PER_BONUS = 100
+COINS_PER_GUESS = 10  # Coins for correct guess
+MAX_INCORRECT_GUESSES = 2
 
 # Dictionary to track current characters and guess attempts for each user
 current_game_state = {
@@ -28,10 +31,6 @@ current_game_state = {
     "character_name": None,
     "user_attempts": {},  # Format: {user_id: attempts}
 }
-
-# Coins for correct guess
-COINS_PER_GUESS = 10
-MAX_INCORRECT_GUESSES = 2
 
 ### --- 1. Helper Functions --- ###
 
@@ -63,6 +62,12 @@ def can_claim_bonus(user_id):
     now = datetime.now()
     last_bonus = user_last_bonus.get(user_id)
     return last_bonus is None or (now - last_bonus).days >= 1
+
+# Function to add coins to the user's balance
+def add_coins(user_id, coins):
+    if user_id not in user_coins:
+        user_coins[user_id] = 0
+    user_coins[user_id] += coins
 
 # Function to reset the game state and send a new character image after 5 messages
 def maybe_fetch_new_character(chat_id):
@@ -117,6 +122,7 @@ def redeem_coins(message):
         if can_redeem(user_id):
             # Award coins
             user_last_redeem[user_id] = datetime.now()  # Record the redeem time
+            add_coins(user_id, COINS_PER_REDEEM)
             bot.reply_to(message, f"🎉 You have successfully redeemed the code and earned {COINS_PER_REDEEM} coins!")
         else:
             # Calculate the remaining time until the next redeem is available
@@ -136,6 +142,7 @@ def claim_bonus(message):
     if can_claim_bonus(user_id):
         # Award daily bonus coins
         user_last_bonus[user_id] = datetime.now()  # Record the claim time
+        add_coins(user_id, COINS_PER_BONUS)
         bot.reply_to(message, f"🎁 {username}, you have claimed your daily bonus and received {COINS_PER_BONUS} coins!")
     else:
         # Calculate the remaining time until they can claim again
@@ -176,7 +183,9 @@ def handle_guess(message):
         # Check if the user is guessing the correct name
         if user_guess == current_game_state["character_name"]:
             # Correct guess
+            add_coins(user_id, COINS_PER_GUESS)  # Award coins for correct guess
             bot.reply_to(message, f"🎉 Congratulations! You guessed correctly and earned {COINS_PER_GUESS} coins!")
+            send_new_character(chat_id)  # Fetch a new character after the correct guess
         else:
             # Incorrect guess
             if user_id not in current_game_state["user_attempts"]:
@@ -188,7 +197,7 @@ def handle_guess(message):
             
             if attempts >= MAX_INCORRECT_GUESSES:
                 bot.reply_to(message, f"❌ You've made {MAX_INCORRECT_GUESSES} incorrect guesses.")
-
+    
     # After every 5 messages, fetch a new character
     maybe_fetch_new_character(chat_id)
 
