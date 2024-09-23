@@ -5,7 +5,7 @@ import sqlite3
 from datetime import datetime, timedelta
 
 # Initialize Telegram Bot
-API_TOKEN = "7831268505:AAF8ZvnYx3RCTpXpRYkLFngUwICIZvYDQjw"  # Replace this with your actual Telegram bot API token
+API_TOKEN = "7831268505:AAGH-KYpGjF8Qk8W819Sj4C9kWpWK0dLGes"  # Replace this with your actual Telegram bot API token
 bot = telebot.TeleBot(API_TOKEN)
 
 # SQLite Database setup
