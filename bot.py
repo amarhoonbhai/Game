@@ -1,16 +1,12 @@
-import os
 import telebot
 import random
 import threading
 import time
+import requests
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
 
-# Load environment variables from .env file (optional if you want to use env for sensitive data)
-load_dotenv()
-
-# Retrieve bot API token from environment variables
-API_TOKEN = "7579121046:AAH6vrelZjsh7j2Uu-9etVrG8hPhluaD6r4"
+# Replace with your actual bot API token
+API_TOKEN = "YOUR_TELEGRAM_BOT_API_TOKEN7579121046:AAH6vrelZjsh7j2Uu-9etVrG8hPhluaD6r4"  # Replace with your Telegram bot API token
 
 # Initialize Telegram Bot
 bot = telebot.TeleBot(API_TOKEN)
@@ -36,20 +32,16 @@ current_game_state = {
 COINS_PER_GUESS = 10
 MAX_INCORRECT_GUESSES = 2
 
-# Function to fetch a random Zerochan image and character name
-def fetch_zerochan_image():
+# Function to fetch a random image from Nekos API
+def fetch_neko_image():
     character_names = ["Naruto", "Sasuke", "Sakura", "Luffy", "Goku", "Vegeta", "Zoro", "Nami", "Hinata", "Kakashi"]
-    search_url = 'https://www.zerochan.net/?s=random'
-    response = requests.get(search_url)
-
+    response = requests.get('https://nekos.life/api/v2/img/neko')
+    
     if response.status_code == 200:
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(response.text, 'html.parser')
-        image = soup.find('img', class_='preview')
-        if image:
-            image_url = image['src']
-            character_name = random.choice(character_names)
-            return image_url, character_name
+        data = response.json()
+        image_url = data.get("url")
+        character_name = random.choice(character_names)  # Simulate fetching a character name
+        return image_url, character_name
     return None, None
 
 # Function to generate a random 5-character redeem code
@@ -141,7 +133,7 @@ def claim_bonus(message):
 # Function to reset the game state and send a new character image
 def send_new_character(chat_id):
     global current_game_state
-    image_url, character_name = fetch_zerochan_image()
+    image_url, character_name = fetch_neko_image()
 
     if image_url and character_name:
         # Reset attempts for each user when a new character is shown
@@ -150,10 +142,10 @@ def send_new_character(chat_id):
         current_game_state["character_name"] = character_name.lower()  # Store character name in lowercase for easy comparison
         
         # Send the new image to the chat
-        bot.send_photo(chat_id, image_url, caption="🎨 Guess the name of this anime character!")
+        bot.send_photo(chat_id, image_url, caption=f"🎨 Guess the name of this anime character!")
     else:
-        # Error handling if the image couldn't be fetched
-        bot.send_message(chat_id, "⚠️ Sending characters in some time, please wait...")
+        # Error handling updated to "Characters are on the way"
+        bot.send_message(chat_id, "⚠️ Characters are on the way. Please wait...")
 
 # Function to handle guesses
 @bot.message_handler(func=lambda message: True)
@@ -187,20 +179,6 @@ def handle_guess(message):
                 # Warn the user about the incorrect guess
                 bot.reply_to(message, f"❌ Incorrect guess. You have {MAX_INCORRECT_GUESSES - attempts} attempts left.")
 
-# /help command - Lists all available commands
-@bot.message_handler(commands=['help'])
-def show_help(message):
-    help_message = """
-    🤖 Available Commands:
-    
-    /start - Start the game
-    /help - Show this help message
-    /redeem <code> - Redeem a valid code for coins
-    /bonus - Claim your daily reward (available every 24 hours)
-    🎮 Guess the name of anime characters from images!
-    """
-    bot.reply_to(message, help_message)
-
 # Start Command - Begins by sending the first character image
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -212,4 +190,3 @@ threading.Thread(target=generate_redeem_code, daemon=True).start()
 
 # Start polling the bot
 bot.infinity_polling()
-        
