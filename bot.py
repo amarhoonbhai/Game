@@ -7,7 +7,7 @@ from pymongo import MongoClient
 from datetime import datetime, timedelta
 
 # Initialize Telegram Bot
-API_TOKEN = "7831268505:AAGJ_2R6ThDTk7C8ZaAfo5FS_CeW2BctVeI"  # Replace with your actual Telegram bot API token
+API_TOKEN = "7740301929:AAEX7zVCxwX_NlsRNM228QVQ1aMCgK4Y2GU"  # Replace with your actual Telegram bot API token
 bot = telebot.TeleBot(API_TOKEN)
 
 # MongoDB Setup
