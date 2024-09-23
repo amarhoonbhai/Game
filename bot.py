@@ -6,26 +6,25 @@ import requests
 from datetime import datetime
 
 # Initialize Telegram Bot
-API_TOKEN = "7831268505:AAH3GEv7xAU_ma4S23DAtJs43-GZ-MJROrU"  # Replace with your actual Telegram bot API token
+API_TOKEN = "7831268505:AAGJ_2R6ThDTk7C8ZaAfo5FS_CeW2BctVeI"  # Replace with your actual Telegram bot API token
 bot = telebot.TeleBot(API_TOKEN)
 
 # Define bot owner and sudo users
-bot_owner_id = "7222795580"  # Replace with your Telegram user ID
-sudo_users = "6180999156" # Add other sudo user IDs if necessary
+bot_owner_id = "7831268505" # Replace with your Telegram user ID
+sudo_users = "6180999156"  # Add other sudo user IDs if necessary
 
 # Define the log channel ID
-log_channel_id = "-1002438449944" # Replace with your character/log channel ID
+log_channel_id =  "-1002438449944" # Replace with your character/log channel ID
 
 # Track unique users and groups
 unique_users = set()
 unique_groups = set()
 
-# API URLs for fetching anime images
+# API URLs for fetching anime images (keeping only working APIs)
 API_URLS = [
     "https://nekos.life/api/v2/img/neko",  # Nekos API
     "https://waifu.pics/api/sfw/waifu",  # Waifu.it API
     "https://api.waifu.im/sfw/waifu/",  # Waifu.im API
-    "https://anime-api.com/api/characters/random",  # NPM Anime API
 ]
 
 # Rarity levels
@@ -35,6 +34,15 @@ RARITY_LEVELS = {
     'legendary': '🥂',
     'mythical': '🔮'
 }
+
+# Current character being displayed (we'll store its image URL and name)
+current_character = {
+    "image_url": None,
+    "name": "waifu",  # Default name for waifus (can be adjusted if APIs return names)
+}
+
+# Player data storage (for storing coins, streaks, and correct guesses)
+players_data = {}
 
 # Fetch a random image from one of the APIs
 def fetch_random_image():
@@ -48,8 +56,6 @@ def fetch_random_image():
         return response.json().get("url")  # Waifu.it API returns image in "url" field
     elif "waifu.im" in api_url:
         return response.json().get("url")  # Waifu.im API returns image in "url" field
-    elif "anime-api.com" in api_url:
-        return response.json().get("image_url")  # NPM Anime API returns "image_url"
     return None
 
 # Get a random rarity level
@@ -98,6 +104,8 @@ def automatic_image_sending(chat_id):
 
 # Send a random character to the chat and log it to the log channel
 def send_random_character(chat_id):
+    global current_character
+
     image_url = fetch_random_image()
     if not image_url:
         bot.send_message(chat_id, "Sorry, couldn't fetch an image. Please try again later.")
@@ -105,6 +113,10 @@ def send_random_character(chat_id):
     
     # Get random rarity
     rarity, emoji = get_random_rarity()
+
+    # Store the current character for future guessing
+    current_character["image_url"] = image_url
+    current_character["name"] = "waifu"  # Setting "waifu" as the character's name since the APIs do not return names.
 
     # Send the character image with an attractive caption and rarity
     attractive_captions = [
@@ -120,6 +132,51 @@ def send_random_character(chat_id):
 
     # Log this character to the log channel (without the URL)
     log_character_to_channel(image_url, rarity)
+
+# Award coins and streak bonus for a correct guess
+def award_coins(user_id, username):
+    player = players_data.get(user_id, {"coins": 0, "correct_guesses": 0, "streak": 0})
+    
+    # Base coins for a correct guess
+    base_coins = 10
+    # Bonus coins for streak (5 coins per streak level)
+    streak_bonus = 5 * player["streak"]
+
+    # Update player's streak, coins, and correct guesses
+    player["streak"] += 1  # Increase streak
+    player["correct_guesses"] += 1  # Increase correct guesses
+    player["coins"] += base_coins + streak_bonus  # Add coins with bonus
+
+    # Save updated player data
+    players_data[user_id] = player
+
+    # Notify the user of their reward
+    bot.reply_to(message, f"🎉 Congratulations {username}! You guessed correctly and earned {base_coins + streak_bonus} coins (Base: {base_coins} + Streak Bonus: {streak_bonus}). Total coins: {player['coins']} (Streak: {player['streak']})")
+
+# Reset streak on an incorrect guess
+def reset_streak(user_id):
+    if user_id in players_data:
+        players_data[user_id]["streak"] = 0  # Reset the streak
+
+# Handle guesses from users without requiring /guess
+@bot.message_handler(func=lambda message: True)
+def handle_guess(message):
+    global current_character
+
+    # Normalize guess text and check if it matches the character's name
+    guess_text = message.text.strip().lower()
+    user_id = message.from_user.id
+    username = message.from_user.username or message.from_user.first_name
+
+    if guess_text == current_character["name"]:
+        # Award coins and streak bonus for a correct guess
+        award_coins(user_id, username)
+        # Fetch and send a new character immediately after a correct guess
+        send_random_character(message.chat.id)
+    else:
+        bot.reply_to(message, "❌ Incorrect guess, try again!")
+        # Reset the player's streak on incorrect guess
+        reset_streak(user_id)
 
 # Stats Command - Only for bot owner and sudo users to see the number of users and groups
 @bot.message_handler(commands=['stats'])
