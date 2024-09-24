@@ -6,8 +6,8 @@ import requests
 from datetime import datetime, timedelta
 
 # Replace with your actual bot API token and owner ID
-API_TOKEN = "7740301929:AAHmkPYLkAuXWSN7sHOItHhBJLz9_fVFGww"  # Replace with your Telegram bot API token
-BOT_OWNER_ID = "7222795580"  # Replace with your Telegram user ID (owner's ID)
+API_TOKEN = "7740301929:AAHfMpnU4rTx-ZJUTYrs6NrwMoPL_P-iLOc"  # Replace with your Telegram bot API token
+BOT_OWNER_ID = 7222795580 # Replace with your Telegram user ID (owner's ID)
 
 # Initialize Telegram Bot
 bot = telebot.TeleBot(API_TOKEN)
