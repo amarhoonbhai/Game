@@ -5,8 +5,9 @@ import time
 import requests
 from datetime import datetime, timedelta
 
-# Replace with your actual bot API token
-API_TOKEN = "7740301929:AAFBl9hRH8KGdTUBI1yD6yefs95HMJ9zDDs"  # Replace with your Telegram bot API token
+# Replace with your actual bot API token and owner ID
+API_TOKEN = "7740301929:AAHmkPYLkAuXWSN7sHOItHhBJLz9_fVFGww"  # Replace with your Telegram bot API token
+BOT_OWNER_ID = "7222795580"  # Replace with your Telegram user ID (owner's ID)
 
 # Initialize Telegram Bot
 bot = telebot.TeleBot(API_TOKEN)
@@ -19,12 +20,14 @@ user_last_bonus = {}   # To track the last bonus claim time of each user
 user_coins = {}  # Dictionary to track each user's coin balance
 user_chat_ids = set()  # Store all chat IDs for redeem code announcements
 message_counter = 0    # Counter for tracking messages
+user_profiles = {}  # Store user profiles (username or first_name)
 
 # Coins awarded for redeeming, daily bonus, and correct guesses
 COINS_PER_REDEEM = 50
 COINS_PER_BONUS = 100
 COINS_PER_GUESS = 10  # Coins for correct guess
 MAX_INCORRECT_GUESSES = 2
+MESSAGES_BEFORE_NEW_IMAGE = 3  # Fetch a new image after every 3 messages
 
 # Dictionary to track current characters and guess attempts for each user
 current_game_state = {
@@ -70,10 +73,10 @@ def add_coins(user_id, coins):
         user_coins[user_id] = 0
     user_coins[user_id] += coins
 
-# Function to reset the game state and send a new character image after 5 messages
+# Function to reset the game state and send a new character image after 3 messages
 def maybe_fetch_new_character(chat_id):
     global message_counter
-    if message_counter >= 5:
+    if message_counter >= MESSAGES_BEFORE_NEW_IMAGE:
         message_counter = 0  # Reset counter after fetching a new character
         send_new_character(chat_id)
 
@@ -101,6 +104,10 @@ def send_new_character(chat_id):
 def send_welcome(message):
     chat_id = message.chat.id
     user_chat_ids.add(chat_id)  # Store user chat ID
+
+    # Store user's profile name
+    user_profiles[message.from_user.id] = message.from_user.username or message.from_user.first_name
+
     bot.reply_to(message, "Welcome to the Anime Character Guessing Game! Try to guess the character's name.")
     send_new_character(chat_id)
 
@@ -113,6 +120,9 @@ def redeem_coins(message):
 
     # Store user chat ID for future announcements
     user_chat_ids.add(message.chat.id)
+
+    # Store user's profile name
+    user_profiles[message.from_user.id] = message.from_user.username or message.from_user.first_name
 
     # Check if a redeem code is active
     if current_redeem_code is None or redeem_code_expiry is None or datetime.now() > redeem_code_expiry:
@@ -147,6 +157,9 @@ def claim_bonus(message):
     # Store user chat ID for future announcements
     user_chat_ids.add(message.chat.id)
 
+    # Store user's profile name
+    user_profiles[message.from_user.id] = message.from_user.username or message.from_user.first_name
+
     # Check if the user can claim the bonus (once per 24 hours)
     if can_claim_bonus(user_id):
         # Award daily bonus coins
@@ -160,7 +173,7 @@ def claim_bonus(message):
         minutes_left = (remaining_time.seconds % 3600) // 60
         bot.reply_to(message, f"⏳ You have already claimed your daily bonus. You can claim again in {hours_left} hours and {minutes_left} minutes.")
 
-# /leaderboard command - Shows the leaderboard with user coins
+# /leaderboard command - Shows the leaderboard with user coins and profile names
 @bot.message_handler(commands=['leaderboard'])
 def show_leaderboard(message):
     if not user_coins:
@@ -172,9 +185,20 @@ def show_leaderboard(message):
     
     leaderboard_message = "🏆 Leaderboard:\n\n"
     for rank, (user_id, coins) in enumerate(sorted_users, start=1):
-        leaderboard_message += f"{rank}. User {user_id}: {coins} coins\n"
+        profile_name = user_profiles.get(user_id, "Unknown")
+        leaderboard_message += f"{rank}. {profile_name}: {coins} coins\n"
 
     bot.reply_to(message, leaderboard_message)
+
+# /stats command - Only for the owner of the bot
+@bot.message_handler(commands=['stats'])
+def show_stats(message):
+    if message.from_user.id == BOT_OWNER_ID:
+        total_users = len(user_profiles)
+        total_groups = len([chat_id for chat_id in user_chat_ids if chat_id < 0])  # Group chats have negative IDs
+        bot.reply_to(message, f"📊 Bot Stats:\n\n👥 Total Users: {total_users}\n🛠️ Total Groups: {total_groups}")
+    else:
+        bot.reply_to(message, "❌ You are not authorized to view this information.")
 
 # /help command - Lists all available commands
 @bot.message_handler(commands=['help'])
@@ -187,6 +211,7 @@ def show_help(message):
     /redeem <code> - Redeem a valid code for coins
     /bonus - Claim your daily reward (available every 24 hours)
     /leaderboard - Show the leaderboard with users and their coins
+    /stats - (Owner only) Show bot stats
     🎮 Guess the name of anime characters from images!
     """
     bot.reply_to(message, help_message)
@@ -203,6 +228,9 @@ def handle_guess(message):
     user_guess = message.text.strip().lower()
 
     message_counter += 1  # Increment message counter with each message
+
+    # Store user's profile name
+    user_profiles[message.from_user.id] = message.from_user.username or message.from_user.first_name
 
     # Check if there's an active image for guessing
     if current_game_state["image_url"] and current_game_state["character_name"]:
@@ -222,9 +250,10 @@ def handle_guess(message):
             attempts = current_game_state["user_attempts"][user_id]
             
             if attempts >= MAX_INCORRECT_GUESSES:
-                bot.reply_to(message, f"❌ You've made {MAX_INCORRECT_GUESSES} incorrect guesses.")
+                bot.reply_to(message, f"❌ Incorrect. The correct name was: {current_game_state['character_name'].capitalize()}")
+                send_new_character(chat_id)  # Fetch a new character after wrong attempts
     
-    # After every 5 messages, fetch a new character
+    # After every 3 messages, fetch a new character
     maybe_fetch_new_character(chat_id)
 
 ### --- 4. Threading and Polling --- ###
