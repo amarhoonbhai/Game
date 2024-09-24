@@ -8,7 +8,8 @@ from datetime import datetime, timedelta
 # Replace with your actual bot API token and owner ID
 API_TOKEN = "7740301929:AAGaX84MeVFn0neJ9y0qOI2CLXg9HDywIkw"  # Replace with your Telegram bot API token
 BOT_OWNER_ID = 7222795580 # Replace with your Telegram user ID (owner's ID)
-MONGO_URI = "mongodb+srv://philoamar825:FlashShine@cluster0.7ulvo.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"  # Replace with your MongoDB connection string
+MONGO_URI = "mongodb+srv://philoamar825:FlashShine@cluster0.7ulvo.mongodb.net/mydatabase?retryWrites=true&w=majority&appName=Cluster0
+"  # Replace with your MongoDB connection string
 CHARACTER_CHANNEL_ID =-1002438449944  # Replace with the actual channel ID to log uploaded characters
 GROUP_CHAT_ID = -1001548130580  # Replace with your group chat ID where codes will be sent
 
