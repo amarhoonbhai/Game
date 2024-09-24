@@ -6,7 +6,7 @@ import requests
 from datetime import datetime, timedelta
 
 # Replace with your actual bot API token
-API_TOKEN = "7740301929:AAE1VCuuzWERtOKvOG-gsVmGdLxaO7ZmxpM"  # Replace with your Telegram bot API token
+API_TOKEN = "7740301929:AAFBl9hRH8KGdTUBI1yD6yefs95HMJ9zDDs"  # Replace with your Telegram bot API token
 
 # Initialize Telegram Bot
 bot = telebot.TeleBot(API_TOKEN)
@@ -160,6 +160,22 @@ def claim_bonus(message):
         minutes_left = (remaining_time.seconds % 3600) // 60
         bot.reply_to(message, f"⏳ You have already claimed your daily bonus. You can claim again in {hours_left} hours and {minutes_left} minutes.")
 
+# /leaderboard command - Shows the leaderboard with user coins
+@bot.message_handler(commands=['leaderboard'])
+def show_leaderboard(message):
+    if not user_coins:
+        bot.reply_to(message, "No leaderboard data available yet.")
+        return
+
+    # Sort the users by the number of coins in descending order
+    sorted_users = sorted(user_coins.items(), key=lambda x: x[1], reverse=True)
+    
+    leaderboard_message = "🏆 Leaderboard:\n\n"
+    for rank, (user_id, coins) in enumerate(sorted_users, start=1):
+        leaderboard_message += f"{rank}. User {user_id}: {coins} coins\n"
+
+    bot.reply_to(message, leaderboard_message)
+
 # /help command - Lists all available commands
 @bot.message_handler(commands=['help'])
 def show_help(message):
@@ -170,6 +186,7 @@ def show_help(message):
     /help - Show this help message
     /redeem <code> - Redeem a valid code for coins
     /bonus - Claim your daily reward (available every 24 hours)
+    /leaderboard - Show the leaderboard with users and their coins
     🎮 Guess the name of anime characters from images!
     """
     bot.reply_to(message, help_message)
