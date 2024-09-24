@@ -2,70 +2,45 @@ import telebot
 import random
 import threading
 import time
-import requests
+from pymongo import MongoClient
 from datetime import datetime, timedelta
 
 # Replace with your actual bot API token and owner ID
-API_TOKEN = "7740301929:AAHfMpnU4rTx-ZJUTYrs6NrwMoPL_P-iLOc"  # Replace with your Telegram bot API token
-BOT_OWNER_ID = 7222795580 # Replace with your Telegram user ID (owner's ID)
+API_TOKEN = "7740301929:AAHY8CI8o8WcspwtHLj5vUip024z1oVZTw4"  # Replace with your Telegram bot API token
+BOT_OWNER_ID = 7222795580  # Replace with your Telegram user ID (owner's ID)
+MONGO_URI = "mongodb+srv://philoamar825:FlashShine@cluster0.7ulvo.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"  # Replace with your MongoDB connection string
+CHARACTER_CHANNEL_ID = -1002438449944  # Replace with the actual channel ID to log uploaded characters
 
-# Initialize Telegram Bot
+# Initialize Telegram Bot and MongoDB
 bot = telebot.TeleBot(API_TOKEN)
+client = MongoClient(MONGO_URI)
+db = client['character_database']  # MongoDB database
+character_collection = db['characters']  # Collection for storing character data
 
-# In-memory store for the current redeem code, expiry time, and users who redeemed
-current_redeem_code = None
-redeem_code_expiry = None
-user_last_redeem = {}  # To track the last redeem time of each user
 user_last_bonus = {}   # To track the last bonus claim time of each user
 user_coins = {}  # Dictionary to track each user's coin balance
-user_chat_ids = set()  # Store all chat IDs for redeem code announcements
-message_counter = 0    # Counter for tracking messages
 user_profiles = {}  # Store user profiles (username or first_name)
 
-# Coins awarded for redeeming, daily bonus, and correct guesses
-COINS_PER_REDEEM = 50
-COINS_PER_BONUS = 100
-COINS_PER_GUESS = 10  # Coins for correct guess
-MAX_INCORRECT_GUESSES = 2
-MESSAGES_BEFORE_NEW_IMAGE = 3  # Fetch a new image after every 3 messages
+# Coins awarded for correct guesses and bonus
+COINS_PER_GUESS = 10
+COINS_PER_BONUS = 100  # Bonus coins for daily reward
 
-# Dictionary to track current characters and guess attempts for each user
-current_game_state = {
-    "image_url": None,
-    "character_name": None,
-    "user_attempts": {},  # Format: {user_id: attempts}
+# Rarity levels for characters
+RARITY_LEVELS = {
+    'Common': '⭐',
+    'Rare': '🌟',
+    'Epic': '💫',
+    'Legendary': '✨'
 }
 
 ### --- 1. Helper Functions --- ###
 
-# Function to fetch a random image from waifu.pics API
-def fetch_waifu_image():
-    """Fetch a random waifu image and simulate a character name."""
-    character_names = ["Naruto", "Sasuke", "Sakura", "Luffy", "Goku", "Vegeta", "Zoro", "Nami", "Hinata", "Kakashi"]
-    response = requests.get('https://api.waifu.pics/sfw/waifu')
-    
-    if response.status_code == 200:
-        data = response.json()
-        image_url = data.get("url")
-        character_name = random.choice(character_names)  # Simulate fetching a character name
-        return image_url, character_name
-    return None, None
-
-# Function to generate a random 5-character redeem code
-def generate_random_code():
-    return ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', k=5))
-
-# Function to check if a user can redeem coins
-def can_redeem(user_id):
-    now = datetime.now()
-    last_redeem = user_last_redeem.get(user_id)
-    return last_redeem is None or (now - last_redeem).total_seconds() >= 3600
-
-# Function to check if a user can claim the daily bonus
-def can_claim_bonus(user_id):
-    now = datetime.now()
-    last_bonus = user_last_bonus.get(user_id)
-    return last_bonus is None or (now - last_bonus).days >= 1
+# Function to check if the user is an admin or owner
+def is_admin_or_owner(message):
+    if message.from_user.id == BOT_OWNER_ID:
+        return True
+    chat_admins = bot.get_chat_administrators(message.chat.id)
+    return message.from_user.id in [admin.user.id for admin in chat_admins]
 
 # Function to add coins to the user's balance
 def add_coins(user_id, coins):
@@ -73,105 +48,74 @@ def add_coins(user_id, coins):
         user_coins[user_id] = 0
     user_coins[user_id] += coins
 
-# Function to reset the game state and send a new character image after 3 messages
-def maybe_fetch_new_character(chat_id):
-    global message_counter
-    if message_counter >= MESSAGES_BEFORE_NEW_IMAGE:
-        message_counter = 0  # Reset counter after fetching a new character
-        send_new_character(chat_id)
+# Function to fetch a random character from the database
+def fetch_random_character():
+    characters = list(character_collection.find())
+    if characters:
+        return random.choice(characters)
+    return None
 
-# Function to send a new character image
-def send_new_character(chat_id):
-    global current_game_state
-    image_url, character_name = fetch_waifu_image()
-
-    if image_url and character_name:
-        # Reset attempts for each user when a new character is shown
-        current_game_state["user_attempts"] = {}
-        current_game_state["image_url"] = image_url
-        current_game_state["character_name"] = character_name.lower()  # Store character name in lowercase for easy comparison
-        
-        # Send the new image to the chat
-        bot.send_photo(chat_id, image_url, caption=f"🎨 Guess the name of this anime character!")
+# Function to format and send a character with an attractive caption
+def send_character(chat_id, character):
+    if character:
+        rarity = character['rarity']
+        emoji_rarity = RARITY_LEVELS.get(rarity, '⭐')
+        caption = (
+            f"🎨 **Guess the Character!**\n\n"
+            f"💬 **Name**: ???\n"
+            f"⚔️ **Rarity**: {emoji_rarity} {rarity}\n\n"
+            f"🌟 Can you guess this amazing character? Let's see!"
+        )
+        bot.send_photo(chat_id, character['image_url'], caption=caption, parse_mode='Markdown')
     else:
-        # Error handling if the image couldn't be fetched
-        bot.send_message(chat_id, "⚠️ Characters are on the way. Please wait...")
+        bot.send_message(chat_id, "⚠️ No characters available in the database!")
+
+# Function to check if the user can claim the bonus (daily reward)
+def can_claim_bonus(user_id):
+    now = datetime.now()
+    last_bonus = user_last_bonus.get(user_id)
+    return last_bonus is None or (now - last_bonus).days >= 1
 
 ### --- 2. Command Handlers --- ###
+
+# /upload command - Allows the owner and admins to upload a new character
+@bot.message_handler(commands=['upload'])
+def upload_character(message):
+    if not is_admin_or_owner(message):
+        bot.reply_to(message, "❌ You do not have permission to use this command.")
+        return
+    
+    # Expecting the format: /upload <image_url> <character_name> <rarity>
+    try:
+        _, image_url, character_name, rarity = message.text.split(maxsplit=3)
+    except ValueError:
+        bot.reply_to(message, "⚠️ Incorrect format. Use: /upload <image_url> <character_name> <rarity>")
+        return
+
+    if rarity not in RARITY_LEVELS:
+        bot.reply_to(message, "⚠️ Invalid rarity. Choose from: Common, Rare, Epic, Legendary.")
+        return
+
+    # Add the character to the MongoDB database
+    character = {
+        'image_url': image_url,
+        'character_name': character_name.lower(),  # Store names in lowercase for easier comparison
+        'rarity': rarity
+    }
+    character_collection.insert_one(character)
+
+    # Send confirmation message and log to the character channel
+    bot.reply_to(message, f"✅ Character '{character_name}' has been uploaded successfully with rarity '{rarity}'!")
+    bot.send_message(CHARACTER_CHANNEL_ID, f"📥 New character uploaded:\n\nName: {character_name}\nRarity: {rarity}")
 
 # /start command - Starts the game
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     chat_id = message.chat.id
-    user_chat_ids.add(chat_id)  # Store user chat ID
-
-    # Store user's profile name
     user_profiles[message.from_user.id] = message.from_user.username or message.from_user.first_name
-
-    bot.reply_to(message, "Welcome to the Anime Character Guessing Game! Try to guess the character's name.")
-    send_new_character(chat_id)
-
-# /redeem command - Redeem coins with a valid redeem code
-@bot.message_handler(commands=['redeem'])
-def redeem_coins(message):
-    global current_redeem_code, redeem_code_expiry
-    user_id = message.from_user.id
-    username = message.from_user.username or message.from_user.first_name
-
-    # Store user chat ID for future announcements
-    user_chat_ids.add(message.chat.id)
-
-    # Store user's profile name
-    user_profiles[message.from_user.id] = message.from_user.username or message.from_user.first_name
-
-    # Check if a redeem code is active
-    if current_redeem_code is None or redeem_code_expiry is None or datetime.now() > redeem_code_expiry:
-        bot.reply_to(message, "⏳ There is no active redeem code or it has expired.")
-        return
-
-    # Get the redeem code the user is trying to redeem
-    redeem_attempt = message.text.strip().split(" ")
-
-    # Check if the redeem command includes the correct code
-    if len(redeem_attempt) == 2 and redeem_attempt[1] == current_redeem_code:
-        # Check if the user can redeem again (only once per hour)
-        if can_redeem(user_id):
-            # Award coins
-            user_last_redeem[user_id] = datetime.now()  # Record the redeem time
-            add_coins(user_id, COINS_PER_REDEEM)
-            bot.reply_to(message, f"🎉 You have successfully redeemed the code and earned {COINS_PER_REDEEM} coins!")
-        else:
-            # Calculate the remaining time until the next redeem is available
-            remaining_time = timedelta(hours=1) - (datetime.now() - user_last_redeem[user_id])
-            minutes_left = remaining_time.seconds // 60
-            bot.reply_to(message, f"⏳ You have already redeemed the code. Please wait {minutes_left} minutes before redeeming again.")
-    else:
-        bot.reply_to(message, "❌ Invalid redeem code. Please try again.")
-
-# /bonus command - Claim daily reward once every 24 hours
-@bot.message_handler(commands=['bonus'])
-def claim_bonus(message):
-    user_id = message.from_user.id
-    username = message.from_user.username or message.from_user.first_name
-
-    # Store user chat ID for future announcements
-    user_chat_ids.add(message.chat.id)
-
-    # Store user's profile name
-    user_profiles[message.from_user.id] = message.from_user.username or message.from_user.first_name
-
-    # Check if the user can claim the bonus (once per 24 hours)
-    if can_claim_bonus(user_id):
-        # Award daily bonus coins
-        user_last_bonus[user_id] = datetime.now()  # Record the claim time
-        add_coins(user_id, COINS_PER_BONUS)
-        bot.reply_to(message, f"🎁 {username}, you have claimed your daily bonus and received {COINS_PER_BONUS} coins!")
-    else:
-        # Calculate the remaining time until they can claim again
-        remaining_time = timedelta(days=1) - (datetime.now() - user_last_bonus[user_id])
-        hours_left = remaining_time.seconds // 3600
-        minutes_left = (remaining_time.seconds % 3600) // 60
-        bot.reply_to(message, f"⏳ You have already claimed your daily bonus. You can claim again in {hours_left} hours and {minutes_left} minutes.")
+    bot.reply_to(message, "Welcome to the Anime Character Guessing Game! Guess the character name.")
+    character = fetch_random_character()
+    send_character(chat_id, character)
 
 # /leaderboard command - Shows the leaderboard with user coins and profile names
 @bot.message_handler(commands=['leaderboard'])
@@ -183,22 +127,33 @@ def show_leaderboard(message):
     # Sort the users by the number of coins in descending order
     sorted_users = sorted(user_coins.items(), key=lambda x: x[1], reverse=True)
     
-    leaderboard_message = "🏆 Leaderboard:\n\n"
+    leaderboard_message = "🏆 **Leaderboard**:\n\n"
     for rank, (user_id, coins) in enumerate(sorted_users, start=1):
         profile_name = user_profiles.get(user_id, "Unknown")
-        leaderboard_message += f"{rank}. {profile_name}: {coins} coins\n"
+        leaderboard_message += f"{rank}. **{profile_name}**: 💰 {coins} coins\n"
 
-    bot.reply_to(message, leaderboard_message)
+    bot.reply_to(message, leaderboard_message, parse_mode='Markdown')
 
-# /stats command - Only for the owner of the bot
-@bot.message_handler(commands=['stats'])
-def show_stats(message):
-    if message.from_user.id == BOT_OWNER_ID:
-        total_users = len(user_profiles)
-        total_groups = len([chat_id for chat_id in user_chat_ids if chat_id < 0])  # Group chats have negative IDs
-        bot.reply_to(message, f"📊 Bot Stats:\n\n👥 Total Users: {total_users}\n🛠️ Total Groups: {total_groups}")
+# /bonus command - Claim daily reward once every 24 hours
+@bot.message_handler(commands=['bonus'])
+def claim_bonus(message):
+    user_id = message.from_user.id
+    username = message.from_user.username or message.from_user.first_name
+
+    # Store user's profile name
+    user_profiles[message.from_user.id] = message.from_user.username or message.from_user.first_name
+
+    # Check if the user can claim the bonus (once per 24 hours)
+    if can_claim_bonus(user_id):
+        # Award daily bonus coins
+        user_last_bonus[user_id] = datetime.now()  # Record the claim time
+        add_coins(user_id, COINS_PER_BONUS)
+        bot.reply_to(message, f"🎁 **{username}**, you have claimed your daily bonus and received **{COINS_PER_BONUS}** coins!", parse_mode='Markdown')
     else:
-        bot.reply_to(message, "❌ You are not authorized to view this information.")
+        remaining_time = timedelta(days=1) - (datetime.now() - user_last_bonus[user_id])
+        hours_left = remaining_time.seconds // 3600
+        minutes_left = (remaining_time.seconds % 3600) // 60
+        bot.reply_to(message, f"⏳ You can claim your next bonus in **{hours_left} hours and {minutes_left} minutes**.", parse_mode='Markdown')
 
 # /help command - Lists all available commands
 @bot.message_handler(commands=['help'])
@@ -208,10 +163,9 @@ def show_help(message):
     
     /start - Start the game
     /help - Show this help message
-    /redeem <code> - Redeem a valid code for coins
-    /bonus - Claim your daily reward (available every 24 hours)
     /leaderboard - Show the leaderboard with users and their coins
-    /stats - (Owner only) Show bot stats
+    /bonus - Claim your daily reward (available every 24 hours)
+    /upload <image_url> <character_name> <rarity> - (Admins only) Upload a new character
     🎮 Guess the name of anime characters from images!
     """
     bot.reply_to(message, help_message)
@@ -221,59 +175,26 @@ def show_help(message):
 # Function to handle guesses and increment message counter
 @bot.message_handler(func=lambda message: True)
 def handle_guess(message):
-    global current_game_state
-    global message_counter
     user_id = message.from_user.id
     chat_id = message.chat.id
     user_guess = message.text.strip().lower()
 
-    message_counter += 1  # Increment message counter with each message
-
     # Store user's profile name
     user_profiles[message.from_user.id] = message.from_user.username or message.from_user.first_name
 
-    # Check if there's an active image for guessing
-    if current_game_state["image_url"] and current_game_state["character_name"]:
-        # Check if the user is guessing the correct name
-        if user_guess == current_game_state["character_name"]:
-            # Correct guess
-            add_coins(user_id, COINS_PER_GUESS)  # Award coins for correct guess
-            bot.reply_to(message, f"🎉 Congratulations! You guessed correctly and earned {COINS_PER_GUESS} coins!")
-            send_new_character(chat_id)  # Fetch a new character after the correct guess
-        else:
-            # Incorrect guess
-            if user_id not in current_game_state["user_attempts"]:
-                current_game_state["user_attempts"][user_id] = 1
-            else:
-                current_game_state["user_attempts"][user_id] += 1
-
-            attempts = current_game_state["user_attempts"][user_id]
-            
-            if attempts >= MAX_INCORRECT_GUESSES:
-                bot.reply_to(message, f"❌ Incorrect. The correct name was: {current_game_state['character_name'].capitalize()}")
-                send_new_character(chat_id)  # Fetch a new character after wrong attempts
+    # Fetch a random character from the database
+    character = fetch_random_character()
     
-    # After every 3 messages, fetch a new character
-    maybe_fetch_new_character(chat_id)
+    if character and user_guess == character['character_name']:
+        # Correct guess
+        add_coins(user_id, COINS_PER_GUESS)  # Award coins for correct guess
+        bot.reply_to(message, f"🎉 **Congratulations!** You guessed correctly and earned **{COINS_PER_GUESS}** coins!", parse_mode='Markdown')
+        send_character(chat_id, fetch_random_character())  # Send a new character
+    else:
+        # No incorrect guess messages or revealing the correct name
+        send_character(chat_id, character)  # Resend the current character for guessing
 
-### --- 4. Threading and Polling --- ###
-
-# Function to generate a new redeem code every hour
-def generate_redeem_code():
-    global current_redeem_code, redeem_code_expiry
-    while True:
-        current_redeem_code = generate_random_code()
-        redeem_code_expiry = datetime.now() + timedelta(hours=1)
-
-        # Announce the new redeem code to all active users
-        for chat_id in user_chat_ids:
-            bot.send_message(chat_id=chat_id, text=f"🔑 New Redeem Code: {current_redeem_code}\nThis code is valid for 1 hour. Use /redeem <code> to claim coins!")
-
-        # Wait for 1 hour before generating the next code
-        time.sleep(3600)
-
-# Start the redeem code generation in a separate thread
-threading.Thread(target=generate_redeem_code, daemon=True).start()
+### --- 4. Start Polling the Bot --- ###
 
 # Start polling the bot
 bot.infinity_polling()
