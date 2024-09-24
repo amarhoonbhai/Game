@@ -6,10 +6,11 @@ from pymongo import MongoClient
 from datetime import datetime, timedelta
 
 # Replace with your actual bot API token and owner ID
-API_TOKEN = "7740301929:AAHY8CI8o8WcspwtHLj5vUip024z1oVZTw4"  # Replace with your Telegram bot API token
-BOT_OWNER_ID = 7222795580  # Replace with your Telegram user ID (owner's ID)
+API_TOKEN = "7740301929:AAGaX84MeVFn0neJ9y0qOI2CLXg9HDywIkw"  # Replace with your Telegram bot API token
+BOT_OWNER_ID = 7222795580 # Replace with your Telegram user ID (owner's ID)
 MONGO_URI = "mongodb+srv://philoamar825:FlashShine@cluster0.7ulvo.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"  # Replace with your MongoDB connection string
-CHARACTER_CHANNEL_ID = -1002438449944  # Replace with the actual channel ID to log uploaded characters
+CHARACTER_CHANNEL_ID =-1002438449944  # Replace with the actual channel ID to log uploaded characters
+GROUP_CHAT_ID = -1001548130580  # Replace with your group chat ID where codes will be sent
 
 # Initialize Telegram Bot and MongoDB
 bot = telebot.TeleBot(API_TOKEN)
@@ -17,13 +18,20 @@ client = MongoClient(MONGO_URI)
 db = client['character_database']  # MongoDB database
 character_collection = db['characters']  # Collection for storing character data
 
+# In-memory store for redeem codes
+current_redeem_code = None
+redeem_code_expiry = None
+redeem_code_claims = {}  # Track which users have redeemed codes
+
 user_last_bonus = {}   # To track the last bonus claim time of each user
 user_coins = {}  # Dictionary to track each user's coin balance
 user_profiles = {}  # Store user profiles (username or first_name)
+user_chat_ids = set()  # Track user chat IDs for redeem code distribution
 
 # Coins awarded for correct guesses and bonus
 COINS_PER_GUESS = 10
 COINS_PER_BONUS = 100  # Bonus coins for daily reward
+COINS_PER_REDEEM = 50  # Coins per redeem
 
 # Rarity levels for characters
 RARITY_LEVELS = {
@@ -76,6 +84,10 @@ def can_claim_bonus(user_id):
     last_bonus = user_last_bonus.get(user_id)
     return last_bonus is None or (now - last_bonus).days >= 1
 
+# Function to generate a random 4-digit redeem code
+def generate_redeem_code():
+    return ''.join(random.choices('0123456789', k=4))
+
 ### --- 2. Command Handlers --- ###
 
 # /upload command - Allows the owner and admins to upload a new character
@@ -96,23 +108,64 @@ def upload_character(message):
         bot.reply_to(message, "⚠️ Invalid rarity. Choose from: Common, Rare, Epic, Legendary.")
         return
 
-    # Add the character to the MongoDB database
-    character = {
-        'image_url': image_url,
-        'character_name': character_name.lower(),  # Store names in lowercase for easier comparison
-        'rarity': rarity
-    }
-    character_collection.insert_one(character)
+    try:
+        # Add the character to the MongoDB database
+        character = {
+            'image_url': image_url,
+            'character_name': character_name.lower(),  # Store names in lowercase for easier comparison
+            'rarity': rarity
+        }
+        character_collection.insert_one(character)
+        
+        # Send confirmation message and log to the character channel
+        bot.reply_to(message, f"✅ Character '{character_name}' has been uploaded successfully with rarity '{rarity}'!")
+        bot.send_message(CHARACTER_CHANNEL_ID, f"📥 New character uploaded:\n\nName: {character_name}\nRarity: {rarity}")
+    
+    except Exception as e:
+        # Log any errors during the MongoDB insertion process
+        bot.reply_to(message, f"❌ Error while adding character to the database: {e}")
 
-    # Send confirmation message and log to the character channel
-    bot.reply_to(message, f"✅ Character '{character_name}' has been uploaded successfully with rarity '{rarity}'!")
-    bot.send_message(CHARACTER_CHANNEL_ID, f"📥 New character uploaded:\n\nName: {character_name}\nRarity: {rarity}")
+# /redeem command - Allows users to redeem the code for coins
+@bot.message_handler(commands=['redeem'])
+def redeem_code(message):
+    global current_redeem_code, redeem_code_expiry
+
+    if current_redeem_code is None or datetime.now() > redeem_code_expiry:
+        bot.reply_to(message, "⏳ There is no active redeem code or it has expired.")
+        return
+
+    user_id = message.from_user.id
+    redeem_attempt = message.text.split()
+
+    if len(redeem_attempt) < 2 or redeem_attempt[1] != current_redeem_code:
+        bot.reply_to(message, "❌ Invalid redeem code.")
+        return
+
+    if user_id in redeem_code_claims:
+        bot.reply_to(message, "⏳ You have already redeemed this code.")
+        return
+
+    # Award coins for redeeming
+    add_coins(user_id, COINS_PER_REDEEM)
+    redeem_code_claims[user_id] = True
+    bot.reply_to(message, f"🎉 You have successfully redeemed the code and earned **{COINS_PER_REDEEM}** coins!")
+
+# /stats command - Only for the owner of the bot to check bot statistics
+@bot.message_handler(commands=['stats'])
+def show_stats(message):
+    if message.from_user.id == BOT_OWNER_ID:
+        total_users = len(user_profiles)
+        total_groups = len([chat_id for chat_id in user_chat_ids if chat_id < 0])  # Group chats have negative IDs
+        bot.reply_to(message, f"📊 Bot Stats:\n\n👥 Total Users: {total_users}\n🛠️ Total Groups: {total_groups}")
+    else:
+        bot.reply_to(message, "❌ You are not authorized to view this information.")
 
 # /start command - Starts the game
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     chat_id = message.chat.id
     user_profiles[message.from_user.id] = message.from_user.username or message.from_user.first_name
+    user_chat_ids.add(chat_id)  # Track chat IDs for sending redeem codes
     bot.reply_to(message, "Welcome to the Anime Character Guessing Game! Guess the character name.")
     character = fetch_random_character()
     send_character(chat_id, character)
@@ -166,35 +219,37 @@ def show_help(message):
     /leaderboard - Show the leaderboard with users and their coins
     /bonus - Claim your daily reward (available every 24 hours)
     /upload <image_url> <character_name> <rarity> - (Admins only) Upload a new character
+    /redeem <code> - Redeem a valid code for coins
+    /stats - (Owner only) Show bot stats
     🎮 Guess the name of anime characters from images!
     """
     bot.reply_to(message, help_message)
 
-### --- 3. Message Handling --- ###
+### --- 3. Redeem Code Generation --- ###
 
-# Function to handle guesses and increment message counter
-@bot.message_handler(func=lambda message: True)
-def handle_guess(message):
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-    user_guess = message.text.strip().lower()
+# Function to automatically generate a new redeem code every 30 minutes and send it to the group
+def auto_generate_redeem_code():
+    global current_redeem_code, redeem_code_expiry, redeem_code_claims
+    while True:
+        current_redeem_code = generate_redeem_code()
+        redeem_code_expiry = datetime.now() + timedelta(minutes=30)
+        redeem_code_claims.clear()  # Reset the claims for the new code
 
-    # Store user's profile name
-    user_profiles[message.from_user.id] = message.from_user.username or message.from_user.first_name
+        # Send the new redeem code to the group and all tracked users
+        redeem_message = f"🔑 New Redeem Code: **{current_redeem_code}**\nThis code is valid for 30 minutes. Use /redeem <code> to claim coins!"
+        bot.send_message(GROUP_CHAT_ID, redeem_message, parse_mode='Markdown')
 
-    # Fetch a random character from the database
-    character = fetch_random_character()
-    
-    if character and user_guess == character['character_name']:
-        # Correct guess
-        add_coins(user_id, COINS_PER_GUESS)  # Award coins for correct guess
-        bot.reply_to(message, f"🎉 **Congratulations!** You guessed correctly and earned **{COINS_PER_GUESS}** coins!", parse_mode='Markdown')
-        send_character(chat_id, fetch_random_character())  # Send a new character
-    else:
-        # No incorrect guess messages or revealing the correct name
-        send_character(chat_id, character)  # Resend the current character for guessing
+        # Send the redeem code to each individual chat that interacted with the bot
+        for chat_id in user_chat_ids:
+            bot.send_message(chat_id, redeem_message, parse_mode='Markdown')
+
+        # Wait for 30 minutes before generating the next code
+        time.sleep(1800)
 
 ### --- 4. Start Polling the Bot --- ###
+
+# Start the redeem code generation in a separate thread
+threading.Thread(target=auto_generate_redeem_code, daemon=True).start()
 
 # Start polling the bot
 bot.infinity_polling()
