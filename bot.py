@@ -4,20 +4,22 @@ import threading
 import time
 from pymongo import MongoClient
 from datetime import datetime, timedelta
+import ssl
 
 # Replace with your actual bot API token and owner ID
 API_TOKEN = "7740301929:AAGaX84MeVFn0neJ9y0qOI2CLXg9HDywIkw"  # Replace with your Telegram bot API token
-BOT_OWNER_ID = 7222795580 # Replace with your Telegram user ID (owner's ID)
-MONGO_URI = "mongodb+srv://philoamar825:FlashShine@cluster0.7ulvo.mongodb.net/mydatabase?retryWrites=true&w=majority&appName=Cluster0
-"  # Replace with your MongoDB connection string
-CHARACTER_CHANNEL_ID =-1002438449944  # Replace with the actual channel ID to log uploaded characters
+BOT_OWNER_ID = 7222795580  # Replace with your Telegram user ID (owner's ID)
+MONGO_URI = "mongodb+srv://philoamar825:FlashShine@cluster0.7ulvo.mongodb.net/mydatabase?retryWrites=true&w=majority&appName=Cluster0"
+CHARACTER_CHANNEL_ID = -1002438449944  # Replace with the actual channel ID to log uploaded characters
 GROUP_CHAT_ID = -1001548130580  # Replace with your group chat ID where codes will be sent
 
-# Initialize Telegram Bot and MongoDB
-bot = telebot.TeleBot(API_TOKEN)
-client = MongoClient(MONGO_URI)
-db = client['character_database']  # MongoDB database
+# Initialize Telegram Bot and MongoDB client with SSL verification disabled
+client = MongoClient(MONGO_URI, ssl=True, ssl_cert_reqs=ssl.CERT_NONE)
+db = client['mydatabase']  # Replace 'mydatabase' with the actual database name
 character_collection = db['characters']  # Collection for storing character data
+
+# Initialize bot
+bot = telebot.TeleBot(API_TOKEN)
 
 # In-memory store for redeem codes
 current_redeem_code = None
