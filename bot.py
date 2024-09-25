@@ -2,23 +2,15 @@ import telebot
 import random
 import threading
 import time
-from pymongo import MongoClient
+import requests
 from datetime import datetime, timedelta
-import ssl
 
 # Replace with your actual bot API token and owner ID
 API_TOKEN = "7740301929:AAGaX84MeVFn0neJ9y0qOI2CLXg9HDywIkw"  # Replace with your Telegram bot API token
 BOT_OWNER_ID = 7222795580  # Replace with your Telegram user ID (owner's ID)
-MONGO_URI = "mongodb+srv://philoamar825:FlashShine@cluster0.7ulvo.mongodb.net/mydatabase?retryWrites=true&w=majority&appName=Cluster0"
-CHARACTER_CHANNEL_ID = -1002438449944  # Replace with the actual channel ID to log uploaded characters
-GROUP_CHAT_ID = -1001548130580  # Replace with your group chat ID where codes will be sent
+GROUP_CHAT_ID =-1001548130580  # Replace with your group chat ID where codes will be sent
 
-# Initialize Telegram Bot and MongoDB client with SSL verification disabled
-client = MongoClient(MONGO_URI, ssl=True, ssl_cert_reqs=ssl.CERT_NONE)
-db = client['mydatabase']  # Replace 'mydatabase' with the actual database name
-character_collection = db['characters']  # Collection for storing character data
-
-# Initialize bot
+# Initialize Telegram Bot
 bot = telebot.TeleBot(API_TOKEN)
 
 # In-memory store for redeem codes
@@ -36,22 +28,19 @@ COINS_PER_GUESS = 10
 COINS_PER_BONUS = 100  # Bonus coins for daily reward
 COINS_PER_REDEEM = 50  # Coins per redeem
 
-# Rarity levels for characters
-RARITY_LEVELS = {
-    'Common': '⭐',
-    'Rare': '🌟',
-    'Epic': '💫',
-    'Legendary': '✨'
+# Stylish symbols for formatting profile names
+STYLE_START = "🔥✨ "
+STYLE_END = " ✨🔥"
+
+# Store items with prices (items available for purchase)
+STORE_ITEMS = {
+    "Sword": 100,
+    "Shield": 150,
+    "Potion": 50,
+    "Magic Scroll": 200
 }
 
 ### --- 1. Helper Functions --- ###
-
-# Function to check if the user is an admin or owner
-def is_admin_or_owner(message):
-    if message.from_user.id == BOT_OWNER_ID:
-        return True
-    chat_admins = bot.get_chat_administrators(message.chat.id)
-    return message.from_user.id in [admin.user.id for admin in chat_admins]
 
 # Function to add coins to the user's balance
 def add_coins(user_id, coins):
@@ -59,27 +48,35 @@ def add_coins(user_id, coins):
         user_coins[user_id] = 0
     user_coins[user_id] += coins
 
-# Function to fetch a random character from the database
-def fetch_random_character():
-    characters = list(character_collection.find())
-    if characters:
-        return random.choice(characters)
-    return None
+# Function to check if the user has enough coins to buy an item
+def has_enough_coins(user_id, cost):
+    return user_coins.get(user_id, 0) >= cost
+
+# Function to fetch a random anime character from MyAnimeList API (via Jikan)
+def fetch_anime_character():
+    try:
+        response = requests.get('https://api.jikan.moe/v4/characters?page=1&limit=1')  # Fetch random anime character
+        if response.status_code == 200:
+            data = response.json()
+            character_info = data['data'][0]
+            image_url = character_info['images']['jpg']['image_url']
+            character_name = character_info['name']
+            return image_url, character_name
+    except Exception as e:
+        print(f"Error fetching character: {e}")
+    return None, None
 
 # Function to format and send a character with an attractive caption
-def send_character(chat_id, character):
-    if character:
-        rarity = character['rarity']
-        emoji_rarity = RARITY_LEVELS.get(rarity, '⭐')
+def send_character(chat_id):
+    image_url, character_name = fetch_anime_character()
+    if image_url and character_name:
         caption = (
-            f"🎨 **Guess the Character!**\n\n"
+            f"🎨 **Guess the Anime Character!**\n\n"
             f"💬 **Name**: ???\n"
-            f"⚔️ **Rarity**: {emoji_rarity} {rarity}\n\n"
-            f"🌟 Can you guess this amazing character? Let's see!"
+            f"🌟 Can you guess this amazing character?\n"
+            f"🤩 **Hint**: First letter: **{character_name[0]}**"
         )
-        bot.send_photo(chat_id, character['image_url'], caption=caption, parse_mode='Markdown')
-    else:
-        bot.send_message(chat_id, "⚠️ No characters available in the database!")
+        bot.send_photo(chat_id, image_url, caption=caption, parse_mode='Markdown')
 
 # Function to check if the user can claim the bonus (daily reward)
 def can_claim_bonus(user_id):
@@ -91,42 +88,12 @@ def can_claim_bonus(user_id):
 def generate_redeem_code():
     return ''.join(random.choices('0123456789', k=4))
 
+# Function to format user profile names stylishly
+def stylish_profile_name(user_id):
+    profile_name = user_profiles.get(user_id, "Unknown")
+    return f"{STYLE_START}{profile_name}{STYLE_END}"
+
 ### --- 2. Command Handlers --- ###
-
-# /upload command - Allows the owner and admins to upload a new character
-@bot.message_handler(commands=['upload'])
-def upload_character(message):
-    if not is_admin_or_owner(message):
-        bot.reply_to(message, "❌ You do not have permission to use this command.")
-        return
-    
-    # Expecting the format: /upload <image_url> <character_name> <rarity>
-    try:
-        _, image_url, character_name, rarity = message.text.split(maxsplit=3)
-    except ValueError:
-        bot.reply_to(message, "⚠️ Incorrect format. Use: /upload <image_url> <character_name> <rarity>")
-        return
-
-    if rarity not in RARITY_LEVELS:
-        bot.reply_to(message, "⚠️ Invalid rarity. Choose from: Common, Rare, Epic, Legendary.")
-        return
-
-    try:
-        # Add the character to the MongoDB database
-        character = {
-            'image_url': image_url,
-            'character_name': character_name.lower(),  # Store names in lowercase for easier comparison
-            'rarity': rarity
-        }
-        character_collection.insert_one(character)
-        
-        # Send confirmation message and log to the character channel
-        bot.reply_to(message, f"✅ Character '{character_name}' has been uploaded successfully with rarity '{rarity}'!")
-        bot.send_message(CHARACTER_CHANNEL_ID, f"📥 New character uploaded:\n\nName: {character_name}\nRarity: {rarity}")
-    
-    except Exception as e:
-        # Log any errors during the MongoDB insertion process
-        bot.reply_to(message, f"❌ Error while adding character to the database: {e}")
 
 # /redeem command - Allows users to redeem the code for coins
 @bot.message_handler(commands=['redeem'])
@@ -163,17 +130,34 @@ def show_stats(message):
     else:
         bot.reply_to(message, "❌ You are not authorized to view this information.")
 
-# /start command - Starts the game
+# /start command - Starts the game and includes /help information
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     chat_id = message.chat.id
     user_profiles[message.from_user.id] = message.from_user.username or message.from_user.first_name
     user_chat_ids.add(chat_id)  # Track chat IDs for sending redeem codes
-    bot.reply_to(message, "Welcome to the Anime Character Guessing Game! Guess the character name.")
-    character = fetch_random_character()
-    send_character(chat_id, character)
+    
+    # Send welcome message along with /help information
+    help_message = """
+    🤖 Welcome to the Anime Character Guessing Game!
+    
+    🎮 Commands:
+    /start - Start the game
+    /help - Show this help message
+    /leaderboard - Show the leaderboard with users and their coins
+    /bonus - Claim your daily reward (available every 24 hours)
+    /redeem <code> - Redeem a valid code for coins
+    /store - View items available for purchase
+    /buy <item> - Purchase an item from the store
+    /stats - (Owner only) Show bot stats
+    🎨 Guess the name of anime characters from images!
+    """
+    bot.reply_to(message, help_message)
 
-# /leaderboard command - Shows the leaderboard with user coins and profile names
+    # Fetch and send the first character
+    send_character(chat_id)
+
+# /leaderboard command - Shows the leaderboard with user coins and profile names in a stylish format
 @bot.message_handler(commands=['leaderboard'])
 def show_leaderboard(message):
     if not user_coins:
@@ -185,8 +169,8 @@ def show_leaderboard(message):
     
     leaderboard_message = "🏆 **Leaderboard**:\n\n"
     for rank, (user_id, coins) in enumerate(sorted_users, start=1):
-        profile_name = user_profiles.get(user_id, "Unknown")
-        leaderboard_message += f"{rank}. **{profile_name}**: 💰 {coins} coins\n"
+        profile_name = stylish_profile_name(user_id)
+        leaderboard_message += f"{rank}. {profile_name}: 💰 {coins} coins\n"
 
     bot.reply_to(message, leaderboard_message, parse_mode='Markdown')
 
@@ -211,7 +195,41 @@ def claim_bonus(message):
         minutes_left = (remaining_time.seconds % 3600) // 60
         bot.reply_to(message, f"⏳ You can claim your next bonus in **{hours_left} hours and {minutes_left} minutes**.", parse_mode='Markdown')
 
-# /help command - Lists all available commands
+# /store command - Lists items available for purchase
+@bot.message_handler(commands=['store'])
+def show_store(message):
+    store_message = "🛒 **Store Items**:\n\n"
+    for item, price in STORE_ITEMS.items():
+        store_message += f"• **{item}**: 💰 {price} coins\n"
+    
+    bot.reply_to(message, store_message, parse_mode='Markdown')
+
+# /buy command - Allows users to purchase items from the store
+@bot.message_handler(commands=['buy'])
+def buy_item(message):
+    user_id = message.from_user.id
+    args = message.text.split(maxsplit=1)
+    
+    if len(args) < 2:
+        bot.reply_to(message, "❌ Please specify an item to buy. Example: /buy Sword")
+        return
+
+    item_to_buy = args[1].strip()
+
+    if item_to_buy not in STORE_ITEMS:
+        bot.reply_to(message, f"❌ The item **{item_to_buy}** is not available in the store.")
+        return
+
+    item_price = STORE_ITEMS[item_to_buy]
+
+    if has_enough_coins(user_id, item_price):
+        # Deduct coins and confirm the purchase
+        user_coins[user_id] -= item_price
+        bot.reply_to(message, f"🎉 Congratulations! You have purchased **{item_to_buy}** for **{item_price}** coins!")
+    else:
+        bot.reply_to(message, "❌ You do not have enough coins to purchase this item.")
+
+# /help command - Lists all available commands (if requested separately)
 @bot.message_handler(commands=['help'])
 def show_help(message):
     help_message = """
@@ -221,10 +239,11 @@ def show_help(message):
     /help - Show this help message
     /leaderboard - Show the leaderboard with users and their coins
     /bonus - Claim your daily reward (available every 24 hours)
-    /upload <image_url> <character_name> <rarity> - (Admins only) Upload a new character
     /redeem <code> - Redeem a valid code for coins
+    /store - View items available for purchase
+    /buy <item> - Purchase an item from the store
     /stats - (Owner only) Show bot stats
-    🎮 Guess the name of anime characters from images!
+    🎨 Guess the name of anime characters from images!
     """
     bot.reply_to(message, help_message)
 
