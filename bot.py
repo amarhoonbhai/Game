@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 API_TOKEN = "7740301929:AAErtzYMqzta0YNh_4KeHw10duTjTP5hEwQ"  # Replace with your Telegram bot API token
 BOT_OWNER_ID = 7222795580  # Replace with your Telegram user ID (owner's ID)
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
+GROUP_CHAT_ID = -1001548130580  # Replace with your group chat ID where codes will be sent
 
 # Initialize Telegram Bot
 bot = telebot.TeleBot(API_TOKEN)
@@ -71,6 +72,10 @@ def is_admin_or_owner(message):
 # Function to auto-assign rarity
 def assign_rarity():
     return random.choice(list(RARITY_LEVELS.keys()))
+
+# Function to generate a random 4-digit redeem code
+def generate_redeem_code():
+    return ''.join(random.choices('0123456789', k=4))
 
 # Function to send a character for guessing
 def send_character(chat_id):
