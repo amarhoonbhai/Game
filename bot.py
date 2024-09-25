@@ -8,7 +8,6 @@ from datetime import datetime, timedelta
 API_TOKEN = "7740301929:AAHB4bWqwQXj4wXT07oyCXHOnf_x_UJfB5I"  # Replace with your Telegram bot API token
 BOT_OWNER_ID = 7222795580  # Replace with your Telegram user ID (owner's ID)
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
-GROUP_CHAT_ID = -1001548130580  # Replace with your group chat ID where codes will be sent
 
 # Initialize Telegram Bot
 bot = telebot.TeleBot(API_TOKEN)
@@ -23,6 +22,9 @@ user_coins = {}  # Dictionary to track each user's coin balance
 user_profiles = {}  # Store user profiles (username or first_name)
 user_chat_ids = set()  # Track user chat IDs for redeem code distribution
 characters = []  # Store uploaded characters
+
+# Counter to track the number of text messages
+message_counter = 0  # We'll reset this after every 2 messages
 
 # Coins awarded for correct guesses and bonus
 COINS_PER_GUESS = 10
@@ -70,10 +72,6 @@ def is_admin_or_owner(message):
 def assign_rarity():
     return random.choice(list(RARITY_LEVELS.keys()))
 
-# Function to generate a random 4-digit redeem code
-def generate_redeem_code():
-    return ''.join(random.choices('0123456789', k=4))
-
 # Function to send a character for guessing
 def send_character(chat_id):
     global current_character
@@ -87,10 +85,6 @@ def send_character(chat_id):
             f"🌟 Can you guess this amazing character?"
         )
         bot.send_photo(chat_id, current_character['image_url'], caption=caption, parse_mode='Markdown')
-
-# Function to fetch the next character after a correct guess
-def fetch_next_character(chat_id):
-    send_character(chat_id)
 
 ### --- 2. Command Handlers --- ###
 
@@ -125,8 +119,10 @@ def upload_character(message):
 # /guess command - Allows users to guess the character name
 @bot.message_handler(func=lambda message: True)
 def guess_character(message):
-    global current_character
+    global current_character, message_counter
     user_guess = message.text.strip().lower()
+
+    # Check if the user is making a guess
     if current_character and user_guess == current_character['character_name'].lower():
         user_id = message.from_user.id
         username = message.from_user.username or message.from_user.first_name
@@ -137,11 +133,14 @@ def guess_character(message):
         # Award coins for the correct guess
         add_coins(user_id, COINS_PER_GUESS)
         bot.reply_to(message, f"🎉 **Congratulations {username}**! You guessed correctly and earned **{COINS_PER_GUESS}** coins!", parse_mode='Markdown')
+    
+    # Increment the message counter
+    message_counter += 1
 
-        # Fetch the next character
-        fetch_next_character(message.chat.id)
-    else:
-        bot.reply_to(message, "❌ Incorrect guess. Try again!")
+    # Send a new character after every 2 text messages
+    if message_counter >= 2:
+        send_character(message.chat.id)
+        message_counter = 0  # Reset the counter
 
 # /redeem command - Allows users to redeem the code for coins
 @bot.message_handler(commands=['redeem'])
@@ -200,9 +199,6 @@ def send_welcome(message):
     🎨 Guess the name of anime characters!
     """
     bot.reply_to(message, help_message)
-
-    # Fetch and send the first character for guessing
-    send_character(chat_id)
 
 # /leaderboard command - Shows the leaderboard with user coins and profile names in a stylish format
 @bot.message_handler(commands=['leaderboard'])
