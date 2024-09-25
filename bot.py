@@ -2,10 +2,12 @@ import telebot
 import random
 import threading
 import time
+import logging
 from datetime import datetime, timedelta
+from collections import defaultdict
 
 # Replace with your actual bot API token, owner ID, and Telegram channel ID
-API_TOKEN = "7579121046:AAFeRRg0GJ6TdFfav5v_d9pZ1enwn1T59JA"  # Replace with your Telegram bot API token
+API_TOKEN = "7740301929:AAF2odu_bYWRgu_vN5CZSH--OgvO0i6lj9g"  # Replace with your Telegram bot API token
 BOT_OWNER_ID = 7222795580  # Replace with your Telegram user ID (owner's ID)
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 GROUP_CHAT_ID = -1001548130580  # Replace with your group chat ID where codes will be sent
@@ -14,8 +16,7 @@ GROUP_CHAT_ID = -1001548130580  # Replace with your group chat ID where codes wi
 bot = telebot.TeleBot(API_TOKEN)
 
 # Logging setup
-import logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(filename='bot.log', level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger()
 
 # In-memory store for redeem codes, characters, and guessing game
@@ -24,18 +25,20 @@ redeem_code_expiry = None
 redeem_code_claims = {}  # Track which users have redeemed codes
 
 user_last_bonus = {}  # To track the last bonus claim time of each user
-user_coins = {}  # Dictionary to track each user's coin balance
+user_coins = defaultdict(int)  # Dictionary to track each user's coin balance
 user_profiles = {}  # Store user profiles (username or first_name)
 user_chat_ids = set()  # Track user chat IDs for redeem code distribution
-characters = []  # Store uploaded characters
+characters = []  # Store uploaded characters, with unique IDs
+
+group_message_count = defaultdict(int)  # Track message count in groups
+user_message_count = defaultdict(int)  # Track message count for users
+user_coins = defaultdict(int)  # Track user coins
+
+# Counter for unique character IDs
+character_id_counter = 1
 
 # Constants
 INITIAL_COINS = 10000  # Coins awarded when a user starts the bot for the first time
-
-# Counter to track the number of text messages
-message_counter = 0  # We'll reset this after every 2 messages
-
-# Coins awarded for correct guesses and bonus
 COINS_PER_GUESS = 10
 COINS_PER_BONUS = 100  # Bonus coins for daily reward
 COINS_PER_REDEEM = 50  # Coins per redeem
@@ -59,9 +62,8 @@ current_character = None
 
 # Function to add coins to the user's balance
 def add_coins(user_id, coins):
-    if user_id not in user_coins:
-        user_coins[user_id] = 0
     user_coins[user_id] += coins
+    logging.info(f"User {user_id} received {coins} coins. Total: {user_coins[user_id]}")
 
 # Function to format user profile names stylishly
 def stylish_profile_name(user_id):
@@ -102,12 +104,15 @@ def send_character(chat_id):
             f"🌟 Can you guess this amazing character?"
         )
         bot.send_photo(chat_id, current_character['image_url'], caption=caption, parse_mode='Markdown')
+        logging.info(f"Character sent for guessing: {current_character['character_name']}")
 
 ### --- 2. Command Handlers --- ###
 
 # /upload command - Allows the owner and admins to upload new characters
 @bot.message_handler(commands=['upload'])
 def upload_character(message):
+    global character_id_counter
+
     if not is_admin_or_owner(message):
         bot.reply_to(message, "❌ You do not have permission to use this command.")
         return
@@ -118,20 +123,27 @@ def upload_character(message):
         bot.reply_to(message, "⚠️ Incorrect format. Use: /upload <image_url> <character_name>")
         return
 
-    # Assign a random rarity and save the character
+    # Assign a random rarity and generate a character ID
     rarity = assign_rarity()
+    character_id = character_id_counter
+    character_id_counter += 1
+
+    # Save the character details
     character = {
+        'id': character_id,
         'image_url': image_url.strip(),
         'character_name': character_name.strip(),
         'rarity': rarity
     }
     characters.append(character)
 
-    # Log the character to the Telegram channel
-    bot.send_message(CHANNEL_ID, f"📥 New Character Uploaded:\n\nName: {character_name}\nRarity: {RARITY_LEVELS[rarity]} {rarity}\nImage URL: {image_url}")
-    bot.reply_to(message, f"✅ Character '{character_name}' with rarity '{RARITY_LEVELS[rarity]} {rarity}' has been uploaded successfully!")
+    # Log the character to the Telegram channel with ID
+    bot.send_message(CHANNEL_ID, f"📥 New Character Uploaded:\n\n🆔 ID: {character_id}\n💬 Name: {character_name}\n⚔️ Rarity: {RARITY_LEVELS[rarity]} {rarity}\n🔗 Image URL: {image_url}")
+    
+    bot.reply_to(message, f"✅ Character '{character_name}' with ID **{character_id}** and rarity '{RARITY_LEVELS[rarity]} {rarity}' has been uploaded successfully!")
+    logging.info(f"Character {character_name} uploaded with ID {character_id}")
 
-# /delete command - Allows the owner and admins to delete characters
+# /delete command - Allows the owner and admins to delete characters by ID
 @bot.message_handler(commands=['delete'])
 def delete_character(message):
     if not is_admin_or_owner(message):
@@ -139,37 +151,88 @@ def delete_character(message):
         return
 
     try:
-        _, character_name = message.text.split(maxsplit=1)
-        character_name = character_name.strip()
+        _, character_id_str = message.text.split(maxsplit=1)
+        character_id = int(character_id_str.strip())
     except ValueError:
-        bot.reply_to(message, "⚠️ Incorrect format. Use: /delete <character_name>")
+        bot.reply_to(message, "⚠️ Incorrect format. Use: /delete <character_id>")
         return
 
     for character in characters:
-        if character['character_name'].lower() == character_name.lower():
+        if character['id'] == character_id:
             characters.remove(character)
-            bot.reply_to(message, f"✅ Character '{character_name}' has been deleted.")
+            bot.reply_to(message, f"✅ Character with ID '{character_id}' has been deleted.")
+            logging.info(f"Character with ID {character_id} deleted")
             return
 
-    bot.reply_to(message, f"❌ Character '{character_name}' not found.")
+    bot.reply_to(message, f"❌ Character with ID '{character_id}' not found.")
 
-# /guess command - Allows users to guess the character name
+# /guess command - Allows users to guess the character name and sends a new character after a correct guess
 @bot.message_handler(func=lambda message: True)
 def guess_character(message):
-    global current_character, message_counter
+    global current_character
+
     user_guess = message.text.strip().lower()
+    user_id = message.from_user.id
+    group_id = message.chat.id
+
+    # Track user and group activity
+    user_message_count[user_id] += 1
+    group_message_count[group_id] += 1
 
     if current_character and user_guess == current_character['character_name'].lower():
-        user_id = message.from_user.id
         username = message.from_user.username or message.from_user.first_name
         user_profiles[user_id] = username
         add_coins(user_id, COINS_PER_GUESS)
         bot.reply_to(message, f"🎉 **Congratulations {username}**! You guessed correctly and earned **{COINS_PER_GUESS}** coins!", parse_mode='Markdown')
 
-    message_counter += 1
-    if message_counter >= 2:
+        # Fetch and send a new character after a correct guess
         send_character(message.chat.id)
-        message_counter = 0
+    else:
+        bot.reply_to(message, "❌ Incorrect guess. Try again!")
+
+# /topusers command - Shows top users by activity (message count)
+@bot.message_handler(commands=['topusers'])
+def top_users(message):
+    if message.from_user.id != BOT_OWNER_ID:
+        bot.reply_to(message, "❌ You do not have permission to use this command.")
+        return
+
+    sorted_users = sorted(user_message_count.items(), key=lambda x: x[1], reverse=True)[:10]
+    message = "🏆 **Top 10 Active Users**:\n\n"
+    for rank, (user_id, count) in enumerate(sorted_users, start=1):
+        profile_name = stylish_profile_name(user_id)
+        message += f"{rank}. {profile_name}: {count} messages\n"
+    
+    bot.reply_to(message, message, parse_mode="Markdown")
+
+# /topgroups command - Shows top active groups by message count
+@bot.message_handler(commands=['topgroups'])
+def top_groups(message):
+    if message.from_user.id != BOT_OWNER_ID:
+        bot.reply_to(message, "❌ You do not have permission to use this command.")
+        return
+
+    sorted_groups = sorted(group_message_count.items(), key=lambda x: x[1], reverse=True)[:10]
+    message = "🏆 **Top 10 Active Groups**:\n\n"
+    for rank, (group_id, count) in enumerate(sorted_groups, start=1):
+        message += f"{rank}. Group ID {group_id}: {count} messages\n"
+    
+    bot.reply_to(message, message, parse_mode="Markdown")
+
+# /topcoins command - Shows top users by coins
+@bot.message_handler(commands=['topcoins'])
+def top_coins(message):
+    if message.from_user.id != BOT_OWNER_ID:
+        bot.reply_to(message, "❌ You do not have permission to use this command.")
+        return
+
+    sorted_users = sorted(user_coins.items(), key=lambda x: x[1], reverse=True)[:10]
+    message = "🏆 **Top 10 Users by Coins**:\n\n"
+    for rank, (user_id, coins) in enumerate(sorted_users, start=1):
+        profile_name = stylish_profile_name(user_id)
+        message += f"{rank}. {profile_name}: 💰 {coins} coins\n"
+
+    bot.reply_to(message, message, parse_mode="Markdown")
 
 # /stats command - Only for the owner of the bot to check bot statistics
 @bot.message_handler(commands=['stats'])
@@ -205,7 +268,10 @@ def send_welcome(message):
     /bonus - Claim your daily reward (every 24 hours)
     /redeem <code> - Redeem a valid code for coins
     /upload <image_url> <character_name> - (Admins only) Upload a new character
-    /delete <character_name> - (Admins only) Delete a character by name
+    /delete <character_id> - (Admins only) Delete a character by ID
+    /topusers - (Owner only) Show top users by activity
+    /topgroups - (Owner only) Show top active groups
+    /topcoins - (Owner only) Show top users by coins
     /stats - (Owner only) Show bot stats
     🎨 Guess the name of anime characters!
     """
@@ -218,7 +284,6 @@ def show_leaderboard(message):
         bot.reply_to(message, "No leaderboard data available yet.")
         return
 
-    # Sort the users by the number of coins in descending order
     sorted_users = sorted(user_coins.items(), key=lambda x: x[1], reverse=True)
 
     leaderboard_message = "🏆 **Leaderboard**:\n\n"
@@ -258,7 +323,10 @@ def show_help(message):
     /bonus - Claim your daily reward (available every 24 hours)
     /redeem <code> - Redeem a valid code for coins
     /upload <image_url> <character_name> - (Admins only) Upload a new character
-    /delete <character_name> - (Admins only) Delete a character by name
+    /delete <character_id> - (Admins only) Delete a character by ID
+    /topusers - (Owner only) Show top users by activity
+    /topgroups - (Owner only) Show top active groups
+    /topcoins - (Owner only) Show top users by coins
     /stats - (Owner only) Show bot stats
     🎨 Guess the name of anime characters!
     """
