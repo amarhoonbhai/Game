@@ -5,7 +5,7 @@ import time
 from datetime import datetime, timedelta
 
 # Replace with your actual bot API token, owner ID, and Telegram channel ID
-API_TOKEN = "7740301929:AAErtzYMqzta0YNh_4KeHw10duTjTP5hEwQ"  # Replace with your Telegram bot API token
+API_TOKEN = "7740301929:AAETIt9zHgrRJgnwM26E23rLNC-KdIeyAdQ"  # Replace with your Telegram bot API token
 BOT_OWNER_ID = 7222795580  # Replace with your Telegram user ID (owner's ID)
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 GROUP_CHAT_ID = -1001548130580  # Replace with your group chat ID where codes will be sent
@@ -121,6 +121,31 @@ def upload_character(message):
 
     bot.reply_to(message, f"✅ Character '{character_name}' with rarity '{RARITY_LEVELS[rarity]} {rarity}' has been uploaded successfully!")
 
+# /delete command - Allows the owner and admins to delete characters
+@bot.message_handler(commands=['delete'])
+def delete_character(message):
+    if not is_admin_or_owner(message):
+        bot.reply_to(message, "❌ You do not have permission to use this command.")
+        return
+
+    # Expecting the format: /delete <character_name>
+    try:
+        _, character_name = message.text.split(maxsplit=1)
+        character_name = character_name.strip()
+    except ValueError:
+        bot.reply_to(message, "⚠️ Incorrect format. Use: /delete <character_name>")
+        return
+
+    # Search for the character and delete it
+    for character in characters:
+        if character['character_name'].lower() == character_name.lower():
+            characters.remove(character)
+            bot.reply_to(message, f"✅ Character '{character_name}' has been deleted.")
+            return
+
+    # If the character is not found
+    bot.reply_to(message, f"❌ Character '{character_name}' not found.")
+
 # /guess command - Allows users to guess the character name
 @bot.message_handler(func=lambda message: True)
 def guess_character(message):
@@ -178,7 +203,8 @@ def show_stats(message):
     if message.from_user.id == BOT_OWNER_ID:
         total_users = len(user_profiles)
         total_groups = len([chat_id for chat_id in user_chat_ids if chat_id < 0])  # Group chats have negative IDs
-        bot.reply_to(message, f"📊 Bot Stats:\n\n👥 Total Users: {total_users}\n🛠️ Total Groups: {total_groups}")
+        total_characters = len(characters)
+        bot.reply_to(message, f"📊 Bot Stats:\n\n👥 Total Users: {total_users}\n🛠️ Total Groups: {total_groups}\n📦 Total Characters: {total_characters}")
     else:
         bot.reply_to(message, "❌ You are not authorized to view this information.")
 
@@ -200,6 +226,7 @@ def send_welcome(message):
     /bonus - Claim your daily reward (available every 24 hours)
     /redeem <code> - Redeem a valid code for coins
     /upload <image_url> <character_name> - (Admins only) Upload a new character
+    /delete <character_name> - (Admins only) Delete a character by name
     /stats - (Owner only) Show bot stats
     🎨 Guess the name of anime characters!
     """
@@ -255,6 +282,7 @@ def show_help(message):
     /bonus - Claim your daily reward (available every 24 hours)
     /redeem <code> - Redeem a valid code for coins
     /upload <image_url> <character_name> - (Admins only) Upload a new character
+    /delete <character_name> - (Admins only) Delete a character by name
     /stats - (Owner only) Show bot stats
     🎨 Guess the name of anime characters!
     """
