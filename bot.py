@@ -7,10 +7,9 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 
 # Replace with your actual bot API token, owner ID, and Telegram channel ID
-API_TOKEN = "7740301929:AAHkMcEgJRle9gvw3gwGBvTPa7XcTK3KiV4"  # Replace with your Telegram bot API token
+API_TOKEN = "7740301929:AAF3SMbXtx3W5Q35aBymIYTvPTLZUal-npY"  # Replace with your Telegram bot API token
 BOT_OWNER_ID = 7222795580  # Replace with your Telegram user ID (owner's ID)
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
-GROUP_CHAT_ID = -1001548130580  # Replace with your group chat ID where codes will be sent
 
 # Initialize Telegram Bot
 bot = telebot.TeleBot(API_TOKEN)
@@ -22,16 +21,22 @@ logger = logging.getLogger()
 # In-memory store for redeem codes, characters, and guessing game
 current_redeem_code = None
 redeem_code_expiry = None
-redeem_code_claims = {}  # Track which users have redeemed codes
+redeem_code_claims = {}
 
-user_last_bonus = {}  # To track the last bonus claim time of each user
-user_coins = defaultdict(int)  # Dictionary to track each user's coin balance
+user_last_bonus = {}  # Track last bonus claim time of each user
+user_coins = defaultdict(int)  # Track each user's coin balance
 user_profiles = {}  # Store user profiles (username or first_name)
 user_chat_ids = set()  # Track user chat IDs for redeem code distribution
-characters = []  # Store uploaded characters, with unique IDs
-
-group_message_count = defaultdict(int)  # Track message count in groups
-user_message_count = defaultdict(int)  # Track message count for users
+characters = []  # Store uploaded characters
+user_streaks = defaultdict(int)  # Track correct guess streaks
+user_achievements = defaultdict(list)  # Track user achievements
+user_correct_guesses = defaultdict(int)  # Track total correct guesses
+user_favorite_characters = defaultdict(list)  # Track user's favorite characters
+user_titles = defaultdict(str)  # Track custom titles
+user_quests = defaultdict(dict)  # Track active quests
+active_group_quizzes = defaultdict(lambda: {"active": False, "participants": {}, "character": None})  # Track group quizzes
+difficulty_level = defaultdict(lambda: 'normal')  # Track user difficulty level
+global_challenge = defaultdict(lambda: {'progress': 0, 'goal': 1000})  # Global guessing challenge
 
 # Counter for unique character IDs
 character_id_counter = 1
@@ -39,21 +44,22 @@ character_id_counter = 1
 # Constants
 INITIAL_COINS = 10000  # Coins awarded when a user starts the bot for the first time
 COINS_PER_GUESS = 10
+COINS_PER_HINT = 5
 COINS_PER_BONUS = 100  # Bonus coins for daily reward
+COINS_PER_STREAK = 20  # Extra coins for streak reward
 COINS_PER_REDEEM = 50  # Coins per redeem
-MESSAGE_THRESHOLD = 10  # Send character after every 10 messages
+HINT_LETTER_COST = 5  # Cost per hint letter
+COINS_PER_QUEST = 50  # Coins for completing a quest
+MULTIPLAYER_REWARD = 100  # Coins for winning a multiplayer quiz
+COINS_FOR_FAVORITING_CHARACTER = 10  # Bonus for favoriting a character
 
 # Rarity levels for characters
 RARITY_LEVELS = {
-    'Common': '⭐',
-    'Rare': '🌟',
-    'Epic': '💫',
-    'Legendary': '✨'
+    'Common': 'Common',
+    'Rare': 'Rare',
+    'Epic': 'Epic',
+    'Legendary': 'Legendary'
 }
-
-# Stylish symbols for formatting profile names
-STYLE_START = "🔥✨ "
-STYLE_END = " ✨🔥"
 
 # Current character in play for guessing
 current_character = None
@@ -64,13 +70,6 @@ current_character = None
 def add_coins(user_id, coins):
     user_coins[user_id] += coins
     logging.info(f"User {user_id} received {coins} coins. Total: {user_coins[user_id]}")
-
-# Function to format user profile names stylishly
-def stylish_profile_name(user_id):
-    profile_name = user_profiles.get(user_id, None)
-    if profile_name:
-        return f"{STYLE_START}{profile_name}{STYLE_END}"
-    return f"{STYLE_START}Unknown{STYLE_END}"
 
 # Function to check if the user is the bot owner or a sudo admin
 def is_admin_or_owner(message):
@@ -100,11 +99,42 @@ def send_character(chat_id):
         caption = (
             f"🎨 **Guess the Anime Character!**\n\n"
             f"💬 **Name**: ???\n"
-            f"⚔️ **Rarity**: {rarity} {current_character['rarity']}\n"
+            f"⚔️ **Rarity**: {rarity}\n"
             f"🌟 Can you guess this amazing character?"
         )
         bot.send_photo(chat_id, current_character['image_url'], caption=caption, parse_mode='Markdown')
         logging.info(f"Character sent for guessing: {current_character['character_name']}")
+
+# Function to award streak rewards
+def award_streak_bonus(user_id, streak):
+    bonus = COINS_PER_STREAK * streak
+    add_coins(user_id, bonus)
+    bot.send_message(user_id, f"🔥 **Streak Bonus!** You earned **{bonus} coins** for a streak of {streak} correct guesses!")
+
+# Function to track and award achievements
+def check_achievements(user_id):
+    total_guesses = user_correct_guesses[user_id]
+    achievements = []
+    
+    if total_guesses >= 50 and "50 Guesses" not in user_achievements[user_id]:
+        user_achievements[user_id].append("50 Guesses")
+        achievements.append("🏅 50 Guesses Achievement!")
+    
+    if total_guesses >= 100 and "100 Guesses" not in user_achievements[user_id]:
+        user_achievements[user_id].append("100 Guesses")
+        achievements.append("🏅 100 Guesses Achievement!")
+    
+    if achievements:
+        bot.send_message(user_id, "🎉 **New Achievements Unlocked**:\n" + "\n".join(achievements))
+
+# Function to update global challenge
+def update_global_challenge():
+    global_challenge['progress'] += 1
+    if global_challenge['progress'] >= global_challenge['goal']:
+        bot.send_message(BOT_OWNER_ID, "🎉 Global challenge complete! All users will receive rewards.")
+        for user_id in user_profiles.keys():
+            add_coins(user_id, 100)  # Reward for completing the global challenge
+        global_challenge['progress'] = 0  # Reset the challenge
 
 ### --- 2. Command Handlers --- ###
 
@@ -138,33 +168,10 @@ def upload_character(message):
     characters.append(character)
 
     # Log the character to the Telegram channel with ID
-    bot.send_message(CHANNEL_ID, f"📥 New Character Uploaded:\n\n🆔 ID: {character_id}\n💬 Name: {character_name}\n⚔️ Rarity: {RARITY_LEVELS[rarity]} {rarity}\n🔗 Image URL: {image_url}")
+    bot.send_message(CHANNEL_ID, f"📥 **New Character Uploaded**:\n\n🆔 **ID**: {character_id}\n💬 **Name**: {character_name}\n⚔️ **Rarity**: {RARITY_LEVELS[rarity]}\n🔗 **Image URL**: {image_url}")
     
-    bot.reply_to(message, f"✅ Character '{character_name}' with ID **{character_id}** and rarity '{RARITY_LEVELS[rarity]} {rarity}' has been uploaded successfully!")
+    bot.reply_to(message, f"✅ Character '{character_name}' with ID **{character_id}** and rarity '{RARITY_LEVELS[rarity]}' has been uploaded successfully!")
     logging.info(f"Character {character_name} uploaded with ID {character_id}")
-
-# /delete command - Allows the owner and admins to delete characters by ID
-@bot.message_handler(commands=['delete'])
-def delete_character(message):
-    if not is_admin_or_owner(message):
-        bot.reply_to(message, "❌ You do not have permission to use this command.")
-        return
-
-    try:
-        _, character_id_str = message.text.split(maxsplit=1)
-        character_id = int(character_id_str.strip())
-    except ValueError:
-        bot.reply_to(message, "⚠️ Incorrect format. Use: /delete <character_id>")
-        return
-
-    for character in characters:
-        if character['id'] == character_id:
-            characters.remove(character)
-            bot.reply_to(message, f"✅ Character with ID '{character_id}' has been deleted.")
-            logging.info(f"Character with ID {character_id} deleted")
-            return
-
-    bot.reply_to(message, f"❌ Character with ID '{character_id}' not found.")
 
 # /guess command - Allows users to guess the character name and sends a new character after a correct guess
 @bot.message_handler(func=lambda message: True)
@@ -174,76 +181,113 @@ def handle_messages(message):
     user_id = message.from_user.id
     group_id = message.chat.id
     user_message_count[user_id] += 1
-    group_message_count[group_id] += 1
 
     # If user guesses the character correctly, reward them with coins
     if current_character and message.text.strip().lower() == current_character['character_name'].lower():
         username = message.from_user.username or message.from_user.first_name
         user_profiles[user_id] = username
+        user_correct_guesses[user_id] += 1
         add_coins(user_id, COINS_PER_GUESS)
+
+        # Track streak and reward
+        user_streaks[user_id] += 1
+        if user_streaks[user_id] % 3 == 0:
+            award_streak_bonus(user_id, user_streaks[user_id])
+
+        check_achievements(user_id)
+        update_global_challenge()
+
         bot.reply_to(message, f"🎉 **Congratulations {username}**! You guessed correctly and earned **{COINS_PER_GUESS}** coins!", parse_mode='Markdown')
         send_character(group_id)  # Send a new character immediately after a correct guess
-
-    # If 10 messages (of any type) are reached in the group, send a new character
-    if group_message_count[group_id] >= MESSAGE_THRESHOLD:
-        send_character(group_id)
-        group_message_count[group_id] = 0  # Reset the message counter
-
-# /stats command - Only for the owner of the bot to check bot statistics
-@bot.message_handler(commands=['stats'])
-def show_stats(message):
-    if message.from_user.id == BOT_OWNER_ID:
-        total_users = len(user_profiles)
-        total_groups = len([chat_id for chat_id in user_chat_ids if chat_id < 0])
-        total_characters = len(characters)
-        bot.reply_to(message, f"📊 Bot Stats:\n\n👥 Total Users: {total_users}\n🛠️ Total Groups: {total_groups}\n📦 Total Characters: {total_characters}")
     else:
-        bot.reply_to(message, "❌ You are not authorized to view this information.")
+        user_streaks[user_id] = 0  # Reset streak on incorrect guess
 
-# /start command - Sends welcome message, gives 10,000 coins, and includes /help information
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    chat_id = message.chat.id
+# /hint command - Reveal a hint (first few letters) for the current character
+@bot.message_handler(commands=['hint'])
+def give_hint(message):
+    global current_character
     user_id = message.from_user.id
-    user_profiles[user_id] = message.from_user.username or message.from_user.first_name
-    user_chat_ids.add(chat_id)
 
-    # Award 10,000 coins to new users
-    if user_id not in user_coins:
-        add_coins(user_id, INITIAL_COINS)
-        bot.reply_to(message, f"💰 Welcome! You've been awarded **{INITIAL_COINS}** coins for starting the game!")
-
-    # Send welcome message along with /help information
-    help_message = """
-    🤖 Welcome to the Anime Character Guessing Game!
-    🎮 Commands:
-    /start - Start the game and get 10,000 coins
-    /help - Show this help message
-    /leaderboard - Show the leaderboard with users and their coins
-    /bonus - Claim your daily reward (every 24 hours)
-    /redeem <code> - Redeem a valid code for coins
-    /upload <image_url> <character_name> - (Admins only) Upload a new character
-    /delete <character_id> - (Admins only) Delete a character by ID
-    /stats - (Owner only) Show bot stats
-    🎨 Guess the name of anime characters!
-    """
-    bot.reply_to(message, help_message)
-
-# /leaderboard command - Shows the leaderboard with user coins and profile names
-@bot.message_handler(commands=['leaderboard'])
-def show_leaderboard(message):
-    if not user_coins:
-        bot.reply_to(message, "No leaderboard data available yet.")
+    if not current_character:
+        bot.reply_to(message, "❌ There's no character to give a hint for.")
         return
 
-    sorted_users = sorted(user_coins.items(), key=lambda x: x[1], reverse=True)
+    if user_coins[user_id] < COINS_PER_HINT:
+        bot.reply_to(message, "❌ You don't have enough coins for a hint.")
+        return
 
-    leaderboard_message = "🏆 **Leaderboard**:\n\n"
-    for rank, (user_id, coins) in enumerate(sorted_users, start=1):
-        profile_name = stylish_profile_name(user_id)
-        leaderboard_message += f"{rank}. {profile_name}: 💰 {coins} coins\n"
+    # Deduct coins and give a hint (reveal the first few letters)
+    add_coins(user_id, -COINS_PER_HINT)
+    hint_length = min(3, len(current_character['character_name']))  # Reveal 3 letters
+    hint = current_character['character_name'][:hint_length]
+    bot.reply_to(message, f"💡 **Hint**: The first {hint_length} letters are: **{hint}**.")
 
-    bot.reply_to(message, leaderboard_message, parse_mode='Markdown')
+# /profile command - Shows the user's profile with stats
+@bot.message_handler(commands=['profile'])
+def show_profile(message):
+    user_id = message.from_user.id
+    total_coins = user_coins.get(user_id, 0)
+    correct_guesses = user_correct_guesses.get(user_id, 0)
+    streak = user_streaks.get(user_id, 0)
+    achievements = user_achievements.get(user_id, [])
+    favorite_characters = user_favorite_characters.get(user_id, [])
+    title = user_titles.get(user_id, "Newbie")
+
+    profile_message = (
+        f"👤 **Profile**\n"
+        f"💰 **Coins**: {total_coins}\n"
+        f"✅ **Correct Guesses**: {correct_guesses}\n"
+        f"🔥 **Current Streak**: {streak}\n"
+        f"🏅 **Achievements**: {', '.join(achievements) if achievements else 'None'}\n"
+        f"💖 **Favorite Characters**: {', '.join(favorite_characters) if favorite_characters else 'None'}\n"
+        f"👑 **Title**: {title}"
+    )
+    bot.reply_to(message, profile_message, parse_mode='Markdown')
+
+# /favorite command - Mark a character as a user's favorite
+@bot.message_handler(commands=['favorite'])
+def favorite_character(message):
+    global current_character
+    user_id = message.from_user.id
+
+    if not current_character:
+        bot.reply_to(message, "❌ There's no character to favorite.")
+        return
+
+    if current_character['character_name'] in user_favorite_characters[user_id]:
+        bot.reply_to(message, "⚠️ You've already marked this character as a favorite.")
+        return
+
+    user_favorite_characters[user_id].append(current_character['character_name'])
+    add_coins(user_id, COINS_FOR_FAVORITING_CHARACTER)
+    bot.reply_to(message, f"💖 You marked **{current_character['character_name']}** as a favorite and earned **{COINS_FOR_FAVORITING_CHARACTER}** coins!")
+
+# /title command - Set a custom title for the user's profile
+@bot.message_handler(commands=['settitle'])
+def set_title(message):
+    user_id = message.from_user.id
+    try:
+        _, new_title = message.text.split(maxsplit=1)
+    except ValueError:
+        bot.reply_to(message, "⚠️ Incorrect format. Use: /settitle <title>")
+        return
+
+    user_titles[user_id] = new_title.strip()
+    bot.reply_to(message, f"👑 Your title has been set to **{new_title}**!")
+
+# /quest command - Shows the user's current quests
+@bot.message_handler(commands=['quest'])
+def show_quests(message):
+    user_id = message.from_user.id
+    user_quests[user_id] = {"guess_5_characters": False, "log_in_daily": False}
+
+    quests = user_quests[user_id]
+    quests_status = (
+        f"🎯 **Daily Quests**:\n"
+        f"1. Guess 5 characters: {'✅ Completed' if quests['guess_5_characters'] else '❌ In Progress'}\n"
+        f"2. Log in daily: {'✅ Completed' if quests['log_in_daily'] else '❌ In Progress'}\n"
+    )
+    bot.reply_to(message, quests_status, parse_mode='Markdown')
 
 # /bonus command - Claim daily reward once every 24 hours
 @bot.message_handler(commands=['bonus'])
@@ -261,25 +305,7 @@ def claim_bonus(message):
         remaining_time = timedelta(days=1) - (datetime.now() - user_last_bonus[user_id])
         hours_left = remaining_time.seconds // 3600
         minutes_left = (remaining_time.seconds % 3600) // 60
-        bot.reply_to(message, f"⏳ You can claim your next bonus in **{hours_left} hours and {minutes_left} minutes**.", parse_mode='Markdown')
-
-# /help command - Lists all available commands (if requested separately)
-@bot.message_handler(commands=['help'])
-def show_help(message):
-    help_message = """
-    🤖 Available Commands:
-    
-    /start - Start the game and get 10,000 coins
-    /help - Show this help message
-    /leaderboard - Show the leaderboard with users and their coins
-    /bonus - Claim your daily reward (available every 24 hours)
-    /redeem <code> - Redeem a valid code for coins
-    /upload <image_url> <character_name> - (Admins only) Upload a new character
-    /delete <character_id> - (Admins only) Delete a character by ID
-    /stats - (Owner only) Show bot stats
-    🎨 Guess the name of anime characters!
-    """
-    bot.reply_to(message, help_message)
+        bot.reply_to(message, f"⏳ **You can claim your next bonus in {hours_left} hours and {minutes_left} minutes**.", parse_mode='Markdown')
 
 ### --- 3. Redeem Code Generation --- ###
 
@@ -289,8 +315,7 @@ def auto_generate_redeem_code():
         current_redeem_code = generate_redeem_code()
         redeem_code_expiry = datetime.now() + timedelta(minutes=30)
         redeem_code_claims.clear()  # Reset the claims for the new code
-        redeem_message = f"🔑 New Redeem Code: **{current_redeem_code}**\nThis code is valid for 30 minutes. Use /redeem <code> to claim coins!"
-        bot.send_message(GROUP_CHAT_ID, redeem_message, parse_mode='Markdown')
+        redeem_message = f"🔑 **New Redeem Code**: **{current_redeem_code}**\nThis code is valid for 30 minutes. Use /redeem <code> to claim coins!"
         for chat_id in user_chat_ids:
             bot.send_message(chat_id, redeem_message, parse_mode='Markdown')
         time.sleep(1800)
