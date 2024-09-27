@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 
 # Replace with your actual bot API token, owner ID, and Telegram channel ID
-API_TOKEN = "7740301929:AAHN7MykNdrwCL_FAJr7fj7JnNWj9vg7dOE"  # Replace with your Telegram bot API token
+API_TOKEN = "7740301929:AAHRuUI4oYo9N5X9TgyUM0BmLIYMzJ86NWs"  # Replace with your Telegram bot API token
 BOT_OWNER_ID = 7222795580  # Replace with your Telegram user ID (owner's ID)
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -79,6 +79,7 @@ def send_welcome(message):
 - /profile - Show your profile with stats and achievements
 - /favorite - Mark a character as your favorite
 - /settitle <title> - Set a custom title for your profile
+- /stats - (Owner only) Show bot stats
 ━━━━━━━━━━━━━━━━━━━━━━
 """
     bot.reply_to(message, help_message, parse_mode='Markdown')
@@ -105,6 +106,85 @@ def claim_daily_reward(message):
     user_last_claim[user_id] = now
     bot.reply_to(message, f"🎉 You have successfully claimed **{DAILY_REWARD_COINS} coins** as your daily reward!")
 
+# /stats command - Only for the owner of the bot to check bot statistics
+@bot.message_handler(commands=['stats'])
+def show_stats(message):
+    if message.from_user.id == BOT_OWNER_ID:
+        total_users = len(user_profiles)
+        total_groups = len([chat_id for chat_id in user_chat_ids if chat_id < 0])  # Group chats have negative IDs
+        bot.reply_to(message, f"📊 **Bot Stats**:\n\n👥 **Total Users**: {total_users}\n💬 **Total Groups**: {total_groups}")
+    else:
+        bot.reply_to(message, "❌ You are not authorized to view this information.")
+
+# /leaderboard command - Shows the leaderboard with users and their coins
+@bot.message_handler(commands=['leaderboard'])
+def show_leaderboard(message):
+    if not user_coins:
+        bot.reply_to(message, "No leaderboard data available yet.")
+        return
+
+    sorted_users = sorted(user_coins.items(), key=lambda x: x[1], reverse=True)
+
+    leaderboard_message = "🏆 **Leaderboard**:\n\n"
+    for rank, (user_id, coins) in enumerate(sorted_users, start=1):
+        profile_name = user_profiles.get(user_id, "Unknown")
+        leaderboard_message += f"{rank}. {profile_name}: {coins} coins\n"
+
+    bot.reply_to(message, leaderboard_message, parse_mode='Markdown')
+
+# /profile command - Shows the user's profile with stats
+@bot.message_handler(commands=['profile'])
+def show_profile(message):
+    user_id = message.from_user.id
+    total_coins = user_coins.get(user_id, 0)
+    correct_guesses = user_correct_guesses.get(user_id, 0)
+    streak = user_streaks.get(user_id, 0)
+    achievements = user_achievements.get(user_id, [])
+    favorite_characters = user_favorite_characters.get(user_id, [])
+    title = user_titles.get(user_id, "Newbie")
+
+    profile_message = (
+        f"👤 **Profile**\n"
+        f"💰 **Coins**: {total_coins}\n"
+        f"✅ **Correct Guesses**: {correct_guesses}\n"
+        f"🔥 **Current Streak**: {streak}\n"
+        f"🏅 **Achievements**: {', '.join(achievements) if achievements else 'None'}\n"
+        f"💖 **Favorite Characters**: {', '.join(favorite_characters) if favorite_characters else 'None'}\n"
+        f"👑 **Title**: {title}"
+    )
+    bot.reply_to(message, profile_message, parse_mode='Markdown')
+
+# /favorite command - Mark a character as a user's favorite
+@bot.message_handler(commands=['favorite'])
+def favorite_character(message):
+    global current_character
+    user_id = message.from_user.id
+
+    if not current_character:
+        bot.reply_to(message, "❌ There's no character to favorite.")
+        return
+
+    if current_character['character_name'] in user_favorite_characters[user_id]:
+        bot.reply_to(message, "⚠️ You've already marked this character as a favorite.")
+        return
+
+    user_favorite_characters[user_id].append(current_character['character_name'])
+    add_coins(user_id, COINS_FOR_FAVORITING_CHARACTER)
+    bot.reply_to(message, f"💖 You marked **{current_character['character_name']}** as a favorite and earned **{COINS_FOR_FAVORITING_CHARACTER}** coins!")
+
+# /settitle command - Set a custom title for the user's profile
+@bot.message_handler(commands=['settitle'])
+def set_title(message):
+    user_id = message.from_user.id
+    try:
+        _, new_title = message.text.split(maxsplit=1)
+    except ValueError:
+        bot.reply_to(message, "⚠️ Incorrect format. Use: /settitle <title>")
+        return
+
+    user_titles[user_id] = new_title.strip()
+    bot.reply_to(message, f"👑 Your title has been set to **{new_title}**!")
+
 # /help command - Lists all available commands if requested separately
 @bot.message_handler(commands=['help'])
 def show_help(message):
@@ -122,6 +202,7 @@ def show_help(message):
 - /profile - Show your profile with stats and achievements
 - /favorite - Mark a character as your favorite
 - /settitle <title> - Set a custom title for your profile
+- /stats - (Owner only) Show bot stats
 ━━━━━━━━━━━━━━━━━━━━━━
 """
     bot.reply_to(message, help_message, parse_mode='Markdown')
