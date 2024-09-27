@@ -11,7 +11,7 @@ CHANNEL_ID = -1001234567890  # Replace with your Telegram channel ID where chara
 # Initialize Telegram Bot
 bot = telebot.TeleBot(API_TOKEN)
 
-# In-memory store for redeem codes, characters, and game data
+# In-memory store for game data
 user_last_claim = {}  # Track the last time each user claimed daily reward
 user_daily_streaks = defaultdict(int)  # Track daily login streaks
 user_coins = defaultdict(int)  # Track each user's coin balance
@@ -60,6 +60,13 @@ def is_admin_or_owner(message):
 def assign_rarity():
     """ Automatically assign rarity based on weighted probability. """
     return random.choices(list(RARITY_LEVELS.keys()), weights=RARITY_WEIGHTS, k=1)[0]
+
+def fetch_new_character():
+    """Fetch a new character from the character database."""
+    global current_character
+    if characters:
+        current_character = random.choice(characters)
+        print(f"New character fetched: {current_character['character_name']}")
 
 ### Command Handlers ###
 
@@ -214,3 +221,45 @@ def end_auction(message):
         del auctions[auction_id]  # Delete the auction
     else:
         bot.reply_to(message, "⚠️ No bids were placed for this auction.")
+
+### Profile and Leaderboard ###
+
+# /profile command - Show user profile with stats, streaks, and achievements
+@bot.message_handler(commands=['profile'])
+def show_profile(message):
+    user_id = message.from_user.id
+    total_coins = user_coins.get(user_id, 0)
+    correct_guesses = user_correct_guesses.get(user_id, 0)
+    streak = user_streaks.get(user_id, 0)
+    inventory = user_inventory.get(user_id, [])
+
+    profile_message = (
+        f"👤 **Profile**\n"
+        f"💰 **Coins**: {total_coins}\n"
+        f"✅ **Correct Guesses**: {correct_guesses}\n"
+        f"🔥 **Current Streak**: {streak}\n"
+        f"🎒 **Inventory**: {len(inventory)} characters collected\n"
+    )
+    bot.reply_to(message, profile_message, parse_mode='Markdown')
+
+# /leaderboard command - Shows the top users based on their coin balance
+@bot.message_handler(commands=['leaderboard'])
+def show_leaderboard(message):
+    if not user_coins:
+        bot.reply_to(message, "No leaderboard data available yet.")
+        return
+
+    # Sort the users by the number of coins in descending order
+    sorted_users = sorted(user_coins.items(), key=lambda x: x[1], reverse=True)
+
+    leaderboard_message = "🏆 **Leaderboard**:\n\n"
+    for rank, (user_id, coins) in enumerate(sorted_users, start=1):
+        profile_name = user_profiles.get(user_id, "Unknown")
+        leaderboard_message += f"{rank}. {profile_name}: 💰 {coins} coins\n"
+
+    bot.reply_to(message, leaderboard_message, parse_mode='Markdown')
+
+# Start polling the bot
+print("Bot is polling...")
+bot.infinity_polling()
+        
