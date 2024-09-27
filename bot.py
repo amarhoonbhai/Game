@@ -2,7 +2,6 @@ import telebot
 import random
 import threading
 import time
-import logging
 from datetime import datetime, timedelta
 from collections import defaultdict
 
@@ -13,10 +12,6 @@ CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where chara
 
 # Initialize Telegram Bot
 bot = telebot.TeleBot(API_TOKEN)
-
-# Logging setup
-logging.basicConfig(filename='logs/bot.log', level=logging.INFO, format='%(asctime)s - %(message)s')
-logger = logging.getLogger()
 
 # In-memory store for redeem codes, characters, and guessing game
 current_redeem_code = None
@@ -50,7 +45,6 @@ COINS_FOR_FAVORITING_CHARACTER = 10  # Bonus for favoriting a character
 # Function to add coins to the user's balance
 def add_coins(user_id, coins):
     user_coins[user_id] += coins
-    logging.info(f"User {user_id} received {coins} coins. Total: {user_coins[user_id]}")
 
 # Function to check if the user is the bot owner or a sudo admin
 def is_admin_or_owner(message):
@@ -59,8 +53,7 @@ def is_admin_or_owner(message):
     try:
         chat_admins = bot.get_chat_administrators(message.chat.id)
         return message.from_user.id in [admin.user.id for admin in chat_admins]
-    except Exception as e:
-        logger.error(f"Error checking admin rights: {e}")
+    except Exception:
         return False
 
 # Function to auto-assign rarity
@@ -84,7 +77,6 @@ def send_character(chat_id):
             f"🌟 Can you guess this amazing character?"
         )
         bot.send_photo(chat_id, current_character['image_url'], caption=caption, parse_mode='Markdown')
-        logging.info(f"Character sent for guessing: {current_character['character_name']}")
 
 ### --- 2. Command Handlers --- ###
 
@@ -121,7 +113,6 @@ def upload_character(message):
     bot.send_message(CHANNEL_ID, f"📥 **New Character Uploaded**:\n\n🆔 **ID**: {character_id}\n💬 **Name**: {character_name}\n⚔️ **Rarity**: {rarity}\n🔗 **Image URL**: {image_url}")
     
     bot.reply_to(message, f"✅ Character '{character_name}' with ID **{character_id}** and rarity '{rarity}' has been uploaded successfully!")
-    logging.info(f"Character {character_name} uploaded with ID {character_id}")
 
 # /delete command - Allows admins to delete a character by ID
 @bot.message_handler(commands=['delete'])
@@ -141,7 +132,6 @@ def delete_character(message):
         if character['id'] == character_id:
             characters.remove(character)
             bot.reply_to(message, f"✅ Character with ID **{character_id}** has been deleted.")
-            logger.info(f"Character with ID {character_id} deleted")
             return
 
     bot.reply_to(message, f"❌ Character with ID **{character_id}** not found.")
@@ -247,7 +237,6 @@ def fetch_new_character():
         current_character = random.choice(characters)
         # Fetch from the stored list of characters
         bot.send_message(CHANNEL_ID, f"🔄 New character fetched from channel!")
-        logging.info("Fetched new character from channel.")
 
 ### --- 3. Redeem Code Generation --- ###
 
