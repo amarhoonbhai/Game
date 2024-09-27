@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 
 # Replace with your actual bot API token, owner ID, and Telegram channel ID
-API_TOKEN = "YOUR_TELEGRAM_BOT_API_TOKEN"
+API_TOKEN = "7579121046:AAHIqrG0MscgQLXgHs4k1-RnXvdhq_eTCoo"
 BOT_OWNER_ID = 7140556192  # Replace with your Telegram user ID (owner's ID)
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
