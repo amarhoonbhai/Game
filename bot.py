@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 
 # Replace with your actual bot API token, owner ID, and Telegram channel ID
-API_TOKEN = "7579121046:AAGPLli-qS53_3RyQwuc7xf39_JeWsa3-Q8"  # Replace with your Telegram bot API token
+API_TOKEN = "7740301929:AAHN7MykNdrwCL_FAJr7fj7JnNWj9vg7dOE"  # Replace with your Telegram bot API token
 BOT_OWNER_ID = 7222795580  # Replace with your Telegram user ID (owner's ID)
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -18,7 +18,7 @@ current_redeem_code = None
 redeem_code_expiry = None
 redeem_code_claims = {}
 
-user_last_bonus = {}  # Track last bonus claim time of each user
+user_last_claim = {}  # Track the last time each user claimed daily reward
 user_coins = defaultdict(int)  # Track each user's coin balance
 user_profiles = {}  # Store user profiles (username or first_name)
 user_chat_ids = set()  # Track user chat IDs for redeem code distribution
@@ -29,11 +29,8 @@ user_correct_guesses = defaultdict(int)  # Track total correct guesses
 user_favorite_characters = defaultdict(list)  # Track user's favorite characters
 user_titles = defaultdict(str)  # Track custom titles
 
-# Counter for unique character IDs
-character_id_counter = 1
-
 # Constants
-INITIAL_COINS = 10000  # Coins awarded when a user starts the bot for the first time
+DAILY_REWARD_COINS = 10000  # Coins given as a daily reward
 COINS_PER_GUESS = 10
 COINS_PER_HINT = 5
 COINS_PER_BONUS = 100  # Bonus coins for daily reward
@@ -58,7 +55,7 @@ def is_admin_or_owner(message):
 
 ### --- 2. Command Handlers --- ###
 
-# /start command - Sends welcome message, gives 10,000 coins, and includes /help information
+# /start command - Sends welcome message with the /help information
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     chat_id = message.chat.id
@@ -66,21 +63,16 @@ def send_welcome(message):
     user_profiles[user_id] = message.from_user.username or message.from_user.first_name
     user_chat_ids.add(chat_id)
 
-    # Award 10,000 coins to new users
-    if user_id not in user_coins:
-        add_coins(user_id, INITIAL_COINS)
-        bot.reply_to(message, f"💰 **Welcome to the Anime Character Guessing Game!**\nYou've been awarded **{INITIAL_COINS} coins** for starting the game!")
-
     # Send welcome message along with /help information
     help_message = """
 ━━━━━━━━━━━━━━━━━━━━━━
 🤖 **Welcome to the Anime Character Guessing Game!**
 
 🎮 **Commands:**
-- /start - Start the game and get 10,000 coins
+- /claim - Claim your daily reward of 10,000 coins
 - /help - Show this help message
 - /leaderboard - Show the leaderboard with users and their coins
-- /bonus - Claim your daily reward (every 24 hours)
+- /bonus - Claim additional bonuses (if available)
 - /redeem <code> - Redeem a valid code for coins
 - /upload <image_url> <character_name> - (Admins only) Upload a new character
 - /delete <character_id> - (Admins only) Delete a character by ID
@@ -90,6 +82,28 @@ def send_welcome(message):
 ━━━━━━━━━━━━━━━━━━━━━━
 """
     bot.reply_to(message, help_message, parse_mode='Markdown')
+
+# /claim command - Allows users to claim daily rewards (10,000 coins once every 24 hours)
+@bot.message_handler(commands=['claim'])
+def claim_daily_reward(message):
+    user_id = message.from_user.id
+    now = datetime.now()
+
+    # Check if the user has already claimed within the past 24 hours
+    if user_id in user_last_claim:
+        last_claim_time = user_last_claim[user_id]
+        time_since_last_claim = now - last_claim_time
+        if time_since_last_claim < timedelta(days=1):
+            remaining_time = timedelta(days=1) - time_since_last_claim
+            hours_left = remaining_time.seconds // 3600
+            minutes_left = (remaining_time.seconds % 3600) // 60
+            bot.reply_to(message, f"⏳ You can claim your next reward in **{hours_left} hours and {minutes_left} minutes**.")
+            return
+
+    # Award daily reward coins
+    add_coins(user_id, DAILY_REWARD_COINS)
+    user_last_claim[user_id] = now
+    bot.reply_to(message, f"🎉 You have successfully claimed **{DAILY_REWARD_COINS} coins** as your daily reward!")
 
 # /help command - Lists all available commands if requested separately
 @bot.message_handler(commands=['help'])
@@ -98,10 +112,10 @@ def show_help(message):
 ━━━━━━━━━━━━━━━━━━━━━━
 🤖 **Available Commands:**
 
-- /start - Start the game and get 10,000 coins
+- /claim - Claim your daily reward of 10,000 coins
 - /help - Show this help message
 - /leaderboard - Show the leaderboard with users and their coins
-- /bonus - Claim your daily reward (every 24 hours)
+- /bonus - Claim additional bonuses (if available)
 - /redeem <code> - Redeem a valid code for coins
 - /upload <image_url> <character_name> - (Admins only) Upload a new character
 - /delete <character_id> - (Admins only) Delete a character by ID
@@ -111,9 +125,6 @@ def show_help(message):
 ━━━━━━━━━━━━━━━━━━━━━━
 """
     bot.reply_to(message, help_message, parse_mode='Markdown')
-
-# Other command handlers (e.g., /leaderboard, /redeem, etc.) go here
-# Refer to the full script above for additional commands and logic
 
 ### --- 3. Start Polling the Bot --- ###
 
