@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7825167784:AAFeXDAATGadSvcP0sVZKa6lYfQec2t3X1E"
+API_TOKEN = "7825167784:AAFrNGXECQW0CB4oT9dlHJeYHUO9RnwnFHk"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -84,7 +84,7 @@ Available Commands:
 /bonus - Claim your daily reward (50,000 coins every 24 hours)
 /profile - View your profile
 /inventory - View your collected characters
-/leaderboard - Show the leaderboard
+/leaderboard - Show the top 10 leaderboard
 /upload <image_url> <character_name> - Upload a new character (Owner only)
 /delete <character_id> - Delete a character (Owner only)
 /stats - Show bot statistics (Owner only)
@@ -188,8 +188,13 @@ def show_inventory(message):
 
 @bot.message_handler(commands=['leaderboard'])
 def show_leaderboard(message):
-    # Sort users by coins in descending order
-    sorted_users = sorted(user_coins.items(), key=lambda x: x[1], reverse=True)[:10]  # Top 10 users only
+    # Combine coins for each unique user
+    unique_user_coins = defaultdict(int)
+    for user_id, coins in user_coins.items():
+        unique_user_coins[user_id] = coins  # Aggregate coins per user ID
+
+    # Sort unique users by their coin totals in descending order
+    sorted_users = sorted(unique_user_coins.items(), key=lambda x: x[1], reverse=True)[:10]  # Top 10 users only
 
     leaderboard_message = "🏆 **Top 10 Leaderboard**:\n\n"
     for rank, (user_id, coins) in enumerate(sorted_users, start=1):
