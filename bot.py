@@ -4,9 +4,9 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7579121046:AAGO9viTNnRmRIcCklF1M5xlevZIbjVuDqM"
+API_TOKEN = "7740301929:AAFcFt3PdSlpVKCO8JkcQunSu-V-tiiQjsE"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
-CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
+CHANNEL_ID = - -1002438449944 # Replace with your Telegram channel ID where characters are logged
 
 bot = telebot.TeleBot(API_TOKEN)
 
@@ -69,6 +69,7 @@ def find_character_by_id(char_id):
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     user_id = message.from_user.id
+    # Capture the user's username, and if not available, fallback to first_name
     user_profiles[user_id] = message.from_user.username or message.from_user.first_name
     bot.reply_to(message, "Welcome to the Anime Character Guessing Game! Type /help for commands.")
 
@@ -174,11 +175,15 @@ def show_inventory(message):
 
 @bot.message_handler(commands=['leaderboard'])
 def show_leaderboard(message):
+    # Sort users by coins in descending order
     sorted_users = sorted(user_coins.items(), key=lambda x: x[1], reverse=True)
+
     leaderboard_message = "🏆 Leaderboard:\n"
     for rank, (user_id, coins) in enumerate(sorted_users, start=1):
-        profile_name = user_profiles.get(user_id, "Unknown")  # Fetch the username or "Unknown" if not available
+        # Ensure user profile (username or first name) is available for leaderboard
+        profile_name = user_profiles.get(user_id, message.from_user.first_name or "Unknown")
         leaderboard_message += f"{rank}. {profile_name}: {coins} coins\n"
+    
     bot.reply_to(message, leaderboard_message)
 
 @bot.message_handler(func=lambda message: True)
