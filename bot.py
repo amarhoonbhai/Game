@@ -9,7 +9,7 @@ BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
 # MongoDB Connection
-MONGO_URI = "mongodb+srv://<username>:<password>@cluster0.mongodb.net/?retryWrites=true&w=majority"  # Replace with your MongoDB URI
+MONGO_URI = "mongodb+srv://PhiloWise:Philo@waifu.yl9tohm.mongodb.net/?retryWrites=true&w=majority&appName=Waifu"  # Replace with your MongoDB URI
 client = MongoClient(MONGO_URI)
 db = client['philo_grabber']  # Database name
 users_collection = db['users']  # Collection for user data
