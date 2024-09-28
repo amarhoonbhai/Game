@@ -4,7 +4,7 @@ from pymongo import MongoClient
 from datetime import datetime, timedelta
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7579121046:AAF3O80rS6UofVBucJcDP1RWb_VnGqjQY_Y"
+API_TOKEN = "YOUR_API_TOKEN"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -33,12 +33,8 @@ RARITY_LEVELS = {
 }
 RARITY_WEIGHTS = [60, 25, 10, 5]
 MESSAGE_THRESHOLD = 5  # Number of messages before sending a new character
-BOOSTER_PRICE = 1000  # Price for opening a booster pack
-BOOSTER_REWARD = 3  # Number of characters in a booster pack
-DAILY_CHALLENGE = "Guess a Legendary character today!"  # Example challenge
 current_character = None
 global_message_count = 0  # Global counter for messages in all chats
-
 
 # Helper Functions
 def get_user_data(user_id):
@@ -66,34 +62,12 @@ def get_character_data():
     """Fetch all character data from the characters collection."""
     return list(characters_collection.find())
 
-def add_character(image_url, character_name, rarity):
-    """Add a new character to the MongoDB characters collection."""
-    character_id = characters_collection.count_documents({}) + 1
-    character = {
-        'id': character_id,
-        'image_url': image_url,
-        'character_name': character_name,
-        'rarity': rarity
-    }
-    characters_collection.insert_one(character)
-    return character
-
-def assign_rarity():
-    """Randomly assign a rarity to a character based on pre-defined weights."""
-    return random.choices(list(RARITY_LEVELS.keys()), weights=RARITY_WEIGHTS, k=1)[0]
-
-def fetch_new_character():
-    """Fetch a random character from the MongoDB collection."""
-    characters = get_character_data()
-    if characters:
-        return random.choice(characters)
-    return None
-
 def send_character(chat_id):
     """Send a character image and details to the chat."""
     global current_character
-    current_character = fetch_new_character()
-    if current_character:
+    characters = get_character_data()
+    if characters:
+        current_character = random.choice(characters)
         rarity = RARITY_LEVELS[current_character['rarity']]
         caption = (
             f"🎨 Guess the Anime Character!\n\n"
@@ -106,143 +80,128 @@ def is_owner_or_sudo(user_id):
     """Check if the user is the bot owner or a sudo user."""
     return user_id == BOT_OWNER_ID or user_id in SUDO_USERS
 
-
-# Command Handlers
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
+# /profile command: Display user stats, including coins, correct guesses, and streak
+@bot.message_handler(commands=['profile'])
+def show_profile(message):
     user_id = message.from_user.id
     user = get_user_data(user_id)
-    if not user['profile']:
-        profile_name = message.from_user.username or message.from_user.first_name
-        update_user_data(user_id, {'profile': profile_name})
-    
-    # Custom welcome message
-    welcome_message = """
-👋 **Welcome to Philo Game!** 🎮
-👑 **Owner**: @TechPiro
 
-🌟 **Game Objective**:
-- Guess anime characters, earn coins, and collect rare characters!
+    profile_name = user['profile'] or "Anonymous"
+    coins = user.get('coins', 0)
+    correct_guesses = user.get('correct_guesses', 0)
+    streak = user.get('streak', 0)
+    inventory_size = len(user.get('inventory', []))
 
-🏆 **Leaderboard**:
-- Compete with other players and climb to the top!
+    profile_message = (
+        f"👤 **Profile: {profile_name}**\n"
+        f"💰 **Coins**: {coins}\n"
+        f"✅ **Correct Guesses**: {correct_guesses}\n"
+        f"🔥 **Streak**: {streak}\n"
+        f"🎒 **Inventory**: {inventory_size} characters"
+    )
+    bot.reply_to(message, profile_message, parse_mode='Markdown')
 
-📜 **Commands**:
-/help - Show all available commands
-/profile - View your stats and achievements
-/inventory - View your collected characters
-/leaderboard - See the top 10 players
-/bonus - Claim your daily reward
-Enjoy the game, and may the best guesser win! 🏅
-"""
-    bot.reply_to(message, welcome_message, parse_mode='Markdown')
-
-@bot.message_handler(commands=['help'])
-def show_help(message):
-    help_message = """
-Available Commands:
-/bonus - Claim your daily reward (50,000 coins every 24 hours)
-/profile - View your profile
-/inventory - View your collected characters (grouped by rarity)
-/leaderboard - Show the top 10 leaderboard
-/upload <image_url> <character_name> - Upload a new character (Owner and Sudo users only)
-/delete <character_id> - Delete a character (Owner only)
-/booster - Buy a character booster pack (1000 coins)
-/trade <user_id> <your_character_id> <their_character_id> - Trade characters with other users
-/collectionrewards - View available rewards for character collections
-/challenge - See today's challenge
-/stats - Show bot statistics (Owner only)
-"""
-    bot.reply_to(message, help_message)
-
-@bot.message_handler(commands=['bonus'])
-def claim_bonus(message):
+# /inventory command: Display user's character collection, grouped by rarity
+@bot.message_handler(commands=['inventory'])
+def show_inventory(message):
     user_id = message.from_user.id
     user = get_user_data(user_id)
-    now = datetime.now()
+    inventory = user.get('inventory', [])
 
-    if user['last_bonus'] and now - datetime.fromisoformat(user['last_bonus']) < BONUS_INTERVAL:
-        next_claim = datetime.fromisoformat(user['last_bonus']) + BONUS_INTERVAL
-        remaining_time = next_claim - now
-        hours_left = remaining_time.seconds // 3600
-        minutes_left = (remaining_time.seconds % 3600) // 60
-        bot.reply_to(message, f"You can claim your next bonus in {hours_left} hours and {minutes_left} minutes.")
+    if not inventory:
+        bot.reply_to(message, "Your inventory is empty. Start guessing characters to collect them!")
     else:
-        new_coins = user['coins'] + BONUS_COINS
-        update_user_data(user_id, {'coins': new_coins, 'last_bonus': now.isoformat()})
-        bot.reply_to(message, f"🎉 You have received {BONUS_COINS} coins!")
+        # Group characters by rarity
+        inventory_by_rarity = {
+            'Common': [],
+            'Rare': [],
+            'Epic': [],
+            'Legendary': []
+        }
 
-@bot.message_handler(commands=['booster'])
-def buy_booster(message):
-    user_id = message.from_user.id
-    user = get_user_data(user_id)
-    
-    if user['coins'] < BOOSTER_PRICE:
-        bot.reply_to(message, "❌ You don't have enough coins to buy a booster pack.")
+        # Group and count characters by rarity
+        for character in inventory:
+            inventory_by_rarity[character['rarity']].append(character)
+
+        inventory_message = f"🎒 **{user['profile']}**'s Character Collection:\n\n"
+        for rarity, char_list in inventory_by_rarity.items():
+            if char_list:
+                inventory_message += f"🔹 **{RARITY_LEVELS[rarity]} {rarity} Characters**:\n"
+                char_count = {}
+                for char in char_list:
+                    if char['character_name'] not in char_count:
+                        char_count[char['character_name']] = 0
+                    char_count[char['character_name']] += 1
+                
+                for char_name, count in char_count.items():
+                    inventory_message += f"  - {char_name} ×{count}\n"
+                inventory_message += "\n"
+
+        bot.reply_to(message, inventory_message)
+
+# /leaderboard command: Show the top 10 users with the most coins
+@bot.message_handler(commands=['leaderboard'])
+def show_leaderboard(message):
+    top_users = users_collection.find().sort('coins', -1).limit(10)
+    leaderboard_message = "🏆 **Top 10 Leaderboard**:\n\n"
+    for rank, user in enumerate(top_users, start=1):
+        profile_name = user['profile'] or "Anonymous"
+        coins = user.get('coins', 0)
+        leaderboard_message += f"{rank}. {profile_name}: {coins} coins\n"
+    bot.reply_to(message, leaderboard_message)
+
+# /stats command: Show bot statistics (total users, coins distributed, correct guesses)
+@bot.message_handler(commands=['stats'])
+def show_stats(message):
+    if message.from_user.id != BOT_OWNER_ID:
+        bot.reply_to(message, "❌ You are not authorized to view this information.")
         return
 
-    new_coins = user['coins'] - BOOSTER_PRICE
-    characters = []
+    total_users = users_collection.count_documents({})
+    total_coins_distributed = sum([user['coins'] for user in users_collection.find()])
+    total_correct_guesses = sum([user['correct_guesses'] for user in users_collection.find()])
 
-    for _ in range(BOOSTER_REWARD):
-        rarity = assign_rarity()
-        new_character = fetch_new_character()
-        if new_character:
-            characters.append(new_character)
-            user['inventory'].append(new_character)
-    
-    update_user_data(user_id, {'coins': new_coins, 'inventory': user['inventory']})
-    booster_message = f"🎁 You've opened a booster pack and received {len(characters)} new characters!"
-    bot.reply_to(message, booster_message)
+    stats_message = (
+        f"📊 **Bot Stats**:\n\n"
+        f"👥 Total Users: {total_users}\n"
+        f"💰 Total Coins Distributed: {total_coins_distributed}\n"
+        f"✅ Total Correct Guesses: {total_correct_guesses}"
+    )
+    bot.reply_to(message, stats_message)
 
-@bot.message_handler(commands=['collectionrewards'])
-def show_collection_rewards(message):
+# Handle all types of messages and increment the message counter
+@bot.message_handler(func=lambda message: True)
+def handle_all_messages(message):
+    global global_message_count
+    chat_id = message.chat.id
     user_id = message.from_user.id
-    user = get_user_data(user_id)
-    collection = user['inventory']
-    
-    if len(collection) >= 50:  # Example threshold for rewards
-        reward_message = "🎉 Congratulations! You've unlocked a special reward for collecting 50 characters!"
-    else:
-        reward_message = "Keep collecting characters to unlock special rewards!"
-    
-    bot.reply_to(message, reward_message)
+    user_guess = message.text.strip().lower() if message.text else ""
 
-@bot.message_handler(commands=['challenge'])
-def show_daily_challenge(message):
-    bot.reply_to(message, f"🔥 **Today's Challenge**: {DAILY_CHALLENGE}")
+    global_message_count += 1
 
-@bot.message_handler(commands=['trade'])
-def trade_characters(message):
-    try:
-        _, other_user_id, your_character_id, their_character_id = message.text.split(maxsplit=3)
-        other_user_id = int(other_user_id)
-        your_character_id = int(your_character_id)
-        their_character_id = int(their_character_id)
-        
-        user_id = message.from_user.id
-        your_data = get_user_data(user_id)
-        other_data = get_user_data(other_user_id)
-        
-        your_character = next((char for char in your_data['inventory'] if char['id'] == your_character_id), None)
-        their_character = next((char for char in other_data['inventory'] if char['id'] == their_character_id), None)
+    if global_message_count >= MESSAGE_THRESHOLD:
+        send_character(chat_id)
+        global_message_count = 0
 
-        if your_character and their_character:
-            # Swap characters between users
-            your_data['inventory'].remove(your_character)
-            their_data['inventory'].remove(their_character)
-
-            your_data['inventory'].append(their_character)
-            their_data['inventory'].append(your_character)
-
-            update_user_data(user_id, {'inventory': your_data['inventory']})
-            update_user_data(other_user_id, {'inventory': other_data['inventory']})
-
-            bot.reply_to(message, "✅ Trade successful!")
+    if current_character:
+        character_name = current_character['character_name'].strip().lower()
+        if user_guess in character_name:
+            user = get_user_data(user_id)
+            new_coins = user['coins'] + COINS_PER_GUESS
+            user['correct_guesses'] += 1
+            user['streak'] += 1
+            streak_bonus = STREAK_BONUS_COINS * user['streak']
+            update_user_data(user_id, {
+                'coins': new_coins + streak_bonus,
+                'correct_guesses': user['correct_guesses'],
+                'streak': user['streak'],
+                'inventory': user['inventory'] + [current_character]
+            })
+            bot.reply_to(message, f"🎉 Congratulations! You guessed correctly and earned {COINS_PER_GUESS} coins!\n"
+                                  f"🔥 Streak Bonus: {streak_bonus} coins for a {user['streak']}-guess streak!")
+            send_character(chat_id)
         else:
-            bot.reply_to(message, "❌ Trade failed. Invalid character IDs.")
-    except ValueError:
-        bot.reply_to(message, "Format: /trade <user_id> <your_character_id> <their_character_id>")
+            update_user_data(user_id, {'streak': 0})
 
-# Load all user data and characters on startup, then start polling the bot
+# Start polling the bot
 bot.infinity_polling(timeout=60, long_polling_timeout=60)
