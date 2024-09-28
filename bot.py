@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7825167784:AAFa__O4E0ZIs4bI9GhPbvrqbz3vV0n5dyQ"
+API_TOKEN = "7825167784:AAHAZSo9iBF5e5sYg5kBBP8CjGWVL3jXJo8"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -170,9 +170,17 @@ def show_inventory(message):
     if not inventory:
         bot.reply_to(message, "Your inventory is empty. Start guessing characters to collect them!")
     else:
-        inventory_message = "🎒 Your Character Collection:\n"
-        for i, character in enumerate(inventory, 1):
-            inventory_message += f"{i}. {character['character_name']} ({character['rarity']})\n"
+        # Count characters and display in compact form (e.g., Naruto x2 if the user has multiple of the same character)
+        inventory_count = {}
+        for character in inventory:
+            key = (character['character_name'], character['rarity'])
+            inventory_count[key] = inventory_count.get(key, 0) + 1
+
+        inventory_message = f"🎒 **{user_profiles.get(user_id, 'Unknown')}**'s Character Collection:\n"
+        for i, ((character_name, rarity), count) in enumerate(inventory_count.items(), 1):
+            # Display character with a count if more than one is owned
+            inventory_message += f"{i}. {character_name} ({rarity}) x{count if count > 1 else ''}\n"
+        
         bot.reply_to(message, inventory_message)
 
 @bot.message_handler(commands=['leaderboard'])
@@ -180,10 +188,10 @@ def show_leaderboard(message):
     # Sort users by coins in descending order
     sorted_users = sorted(user_coins.items(), key=lambda x: x[1], reverse=True)
 
-    leaderboard_message = "🏆 Leaderboard:\n"
+    leaderboard_message = "🏆 **Leaderboard**:\n\n"
     for rank, (user_id, coins) in enumerate(sorted_users, start=1):
         # Ensure user profile (username or first name) is available for leaderboard
-        profile_name = user_profiles.get(user_id, message.from_user.first_name or "Unknown")
+        profile_name = user_profiles.get(user_id, "Unknown")  # Use "Unknown" if name is not available
         leaderboard_message += f"{rank}. {profile_name}: {coins} coins\n"
     
     bot.reply_to(message, leaderboard_message)
