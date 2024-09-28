@@ -20,7 +20,10 @@ characters = []  # List of uploaded characters (with ID)
 current_character = None
 message_counter = defaultdict(int)  # Track message count per chat
 
-# Bonus and guessing settings
+# Global message count
+global_message_count = 0  # Global counter for messages in all chats
+
+# Settings
 BONUS_COINS = 50000  # Bonus amount for daily claim
 BONUS_INTERVAL = timedelta(days=1)  # Bonus claim interval (24 hours)
 COINS_PER_GUESS = 50  # Coins for correct guesses
@@ -32,6 +35,7 @@ RARITY_LEVELS = {
 }
 RARITY_WEIGHTS = [60, 25, 10, 5]
 character_id_counter = 1  # Counter for character IDs
+MESSAGE_THRESHOLD = 5  # Number of messages before sending a new character
 
 # Helper Functions
 def add_coins(user_id, coins):
@@ -204,21 +208,31 @@ def show_stats(message):
     )
     bot.reply_to(message, stats_message, parse_mode='Markdown')
 
+# Function to handle all types of messages and increment the message counter
 @bot.message_handler(func=lambda message: True)
-def guess_character(message):
-    global current_character
+def handle_all_messages(message):
+    global global_message_count
+    chat_id = message.chat.id
     user_id = message.from_user.id
-    user_guess = message.text.strip().lower()  # Convert guess to lowercase and trim spaces
+    user_guess = message.text.strip().lower() if message.text else ""
 
+    # Increment global message counter
+    global_message_count += 1
+
+    # Check if the message count has reached the threshold
+    if global_message_count >= MESSAGE_THRESHOLD:
+        send_character(chat_id)  # Send a new character after the threshold is reached
+        global_message_count = 0  # Reset the message counter
+
+    # Check if the user is guessing the character
     if current_character:
-        character_name = current_character['character_name'].strip().lower()  # Trim spaces and convert to lowercase
-
+        character_name = current_character['character_name'].strip().lower()
         if user_guess == character_name:
             add_coins(user_id, COINS_PER_GUESS)
             user_correct_guesses[user_id] += 1
             user_inventory[user_id].append(current_character)  # Add character to user's inventory
             bot.reply_to(message, f"🎉 Congratulations! You guessed correctly and earned {COINS_PER_GUESS} coins!")
-            send_character(message.chat.id)  # Send a new character after correct guess
+            send_character(chat_id)  # Send a new character after correct guess
 
 # Start polling the bot
 bot.infinity_polling(timeout=60, long_polling_timeout=60)
