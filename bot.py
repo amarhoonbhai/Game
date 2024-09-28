@@ -4,9 +4,9 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 
 # Replace with your actual bot API token, owner ID, and Telegram channel ID
-API_TOKEN = "7740301929:AAG5bo2eBKUShTNHze_xngf21bx9u9WiVWk"
+API_TOKEN = "7740301929:AAHh85vaHJ2ew7EFPRB-GFX5Jk5voU6f75w"
 BOT_OWNER_ID = 7222795580  # Replace with your Telegram user ID (owner's ID)
-CHANNEL_ID = -1001234567890  # Replace with your Telegram channel ID where characters are logged
+CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
 # Initialize Telegram Bot
 bot = telebot.TeleBot(API_TOKEN)
@@ -24,7 +24,7 @@ characters = []  # List of all uploaded characters
 current_character = None
 auctions = {}  # Track ongoing character auctions
 auction_id_counter = 1  # Track auction IDs
-pvp_challenges = {}  # Store active PvP challenges
+message_counter = defaultdict(int)  # Track the number of messages per chat
 
 DAILY_REWARD_COINS = 10000  # Coins given as a daily reward
 COINS_PER_GUESS = 50  # Coins awarded for correct guesses
@@ -40,12 +40,6 @@ RARITY_WEIGHTS = [60, 25, 10, 5]  # Probabilities for selecting rarity (in perce
 def add_coins(user_id, coins):
     user_coins[user_id] += coins
     print(f"User {user_id} awarded {coins} coins. Total: {user_coins[user_id]}")
-
-def deduct_coins(user_id, coins):
-    if user_coins[user_id] >= coins:
-        user_coins[user_id] -= coins
-        return True
-    return False
 
 def is_admin_or_owner(message):
     """ Check if the user is the bot owner or an admin. """
@@ -67,6 +61,23 @@ def fetch_new_character():
     if characters:
         current_character = random.choice(characters)
         print(f"New character fetched: {current_character['character_name']}")
+        return current_character
+    return None
+
+def send_character(chat_id):
+    """Send the current character to the group chat for guessing."""
+    character = fetch_new_character()
+    if character:
+        rarity = RARITY_LEVELS[character['rarity']]
+        caption = (
+            f"🎨 **Guess the Anime Character!**\n\n"
+            f"💬 **Name**: ???\n"
+            f"⚔️ **Rarity**: {rarity} {character['rarity']}\n"
+            f"🌟 Can you guess this amazing character?"
+        )
+        bot.send_photo(chat_id, character['image_url'], caption=caption, parse_mode='Markdown')
+    else:
+        bot.send_message(chat_id, "❌ No characters available to guess at the moment.")
 
 ### Command Handlers ###
 
@@ -93,6 +104,40 @@ Type /help to see the full list of commands!
 ━━━━━━━━━━━━━━━━━━━━━━
 """
     bot.reply_to(message, welcome_message, parse_mode='Markdown')
+
+# /help command
+@bot.message_handler(commands=['help'])
+def show_help(message):
+    help_message = """
+━━━━━━━━━━━━━━━━━━━━━━
+🤖 **Available Commands:**
+
+- /claim - Claim your daily reward of 10,000 coins
+- /profile - View your profile with stats and achievements
+- /inventory - View your collected characters
+- /guess <name> - Guess the current character's name
+- /leaderboard - Show the leaderboard with users and their coins
+- /auction <character_id> <starting_bid> - Start an auction for a character
+- /bid <auction_id> <bid_amount> - Place a bid on an ongoing auction
+- /endauction <auction_id> - End an auction and transfer the character
+- /upload <image_url> <character_name> - (Admins only) Upload a new character
+- /settitle <title> - Set a custom title for your profile
+━━━━━━━━━━━━━━━━━━━━━━
+"""
+    bot.reply_to(message, help_message, parse_mode='Markdown')
+
+# Message handler for all text, stickers, and media messages
+@bot.message_handler(content_types=['text', 'sticker', 'photo', 'video', 'document'])
+def count_messages(message):
+    chat_id = message.chat.id
+
+    # Increment message counter for the chat
+    message_counter[chat_id] += 1
+
+    # If the counter reaches 5, send a new character and reset the counter
+    if message_counter[chat_id] >= 5:
+        send_character(chat_id)
+        message_counter[chat_id] = 0  # Reset counter
 
 # /upload command - Allows the owner and admins to upload new characters
 @bot.message_handler(commands=['upload'])
@@ -122,107 +167,13 @@ def upload_character(message):
                f"⚔️ **Rarity**: {RARITY_LEVELS[rarity]} {rarity}\n"
                f"🔗 **Image URL**: {image_url}\n"
                f"🆔 **ID**: {character_id}")
-    bot.send_photo(CHANNEL_ID, image_url, caption=caption, parse_mode='Markdown')
-    bot.reply_to(message, f"✅ Character '{character_name}' uploaded successfully!")
-
-### Auctions ###
-
-# /auction command - Start an auction for a character
-@bot.message_handler(commands=['auction'])
-def start_auction(message):
-    global auction_id_counter
+    
+    # Send the character to the channel
     try:
-        _, character_id, starting_bid = message.text.split(maxsplit=2)
-        character_id = int(character_id)
-        starting_bid = int(starting_bid)
-    except (ValueError, IndexError):
-        bot.reply_to(message, "⚠️ Incorrect format. Use: /auction <character_id> <starting_bid>")
-        return
-
-    user_id = message.from_user.id
-    character = next((c for c in user_inventory[user_id] if c['id'] == character_id), None)
-    if not character:
-        bot.reply_to(message, "❌ You don't own a character with that ID.")
-        return
-
-    auction_id = auction_id_counter
-    auctions[auction_id] = {
-        'owner': user_id,
-        'character': character,
-        'current_bid': starting_bid,
-        'highest_bidder': None
-    }
-    auction_id_counter += 1
-
-    bot.reply_to(message, f"🎉 Auction started for **{character['character_name']}** with a starting bid of **{starting_bid}** coins!\nAuction ID: {auction_id}")
-
-# /bid command - Place a bid on an auction
-@bot.message_handler(commands=['bid'])
-def place_bid(message):
-    try:
-        _, auction_id, bid_amount = message.text.split(maxsplit=2)
-        auction_id = int(auction_id)
-        bid_amount = int(bid_amount)
-    except (ValueError, IndexError):
-        bot.reply_to(message, "⚠️ Incorrect format. Use: /bid <auction_id> <bid_amount>")
-        return
-
-    user_id = message.from_user.id
-    auction = auctions.get(auction_id)
-
-    if not auction:
-        bot.reply_to(message, "❌ Auction not found.")
-        return
-
-    if bid_amount <= auction['current_bid']:
-        bot.reply_to(message, f"⚠️ Your bid must be higher than the current bid of **{auction['current_bid']}** coins.")
-        return
-
-    if not deduct_coins(user_id, bid_amount):
-        bot.reply_to(message, "❌ You don't have enough coins to place this bid.")
-        return
-
-    if auction['highest_bidder']:
-        add_coins(auction['highest_bidder'], auction['current_bid'])  # Refund the previous highest bidder
-
-    auction['current_bid'] = bid_amount
-    auction['highest_bidder'] = user_id
-
-    bot.reply_to(message, f"🎉 You are the highest bidder for **{auction['character']['character_name']}** with **{bid_amount}** coins!")
-
-# /endauction command - Ends an auction and awards the character to the highest bidder
-@bot.message_handler(commands=['endauction'])
-def end_auction(message):
-    try:
-        _, auction_id = message.text.split(maxsplit=1)
-        auction_id = int(auction_id)
-    except (ValueError, IndexError):
-        bot.reply_to(message, "⚠️ Incorrect format. Use: /endauction <auction_id>")
-        return
-
-    auction = auctions.get(auction_id)
-    if not auction:
-        bot.reply_to(message, "❌ Auction not found.")
-        return
-
-    owner_id = message.from_user.id
-    if auction['owner'] != owner_id:
-        bot.reply_to(message, "❌ You are not the owner of this auction.")
-        return
-
-    if auction['highest_bidder']:
-        # Transfer character to highest bidder
-        user_inventory[auction['highest_bidder']].append(auction['character'])
-        bot.reply_to(message, f"🎉 Auction ended! {auction['character']['character_name']} goes to the highest bidder!")
-
-        # Remove character from the owner's inventory
-        user_inventory[owner_id].remove(auction['character'])
-
-        del auctions[auction_id]  # Delete the auction
-    else:
-        bot.reply_to(message, "⚠️ No bids were placed for this auction.")
-
-### Profile and Leaderboard ###
+        bot.send_photo(CHANNEL_ID, image_url, caption=caption, parse_mode='Markdown')
+        bot.reply_to(message, f"✅ Character '{character_name}' uploaded successfully!")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Failed to send the character to the channel. Error: {e}")
 
 # /profile command - Show user profile with stats, streaks, and achievements
 @bot.message_handler(commands=['profile'])
@@ -262,4 +213,3 @@ def show_leaderboard(message):
 # Start polling the bot
 print("Bot is polling...")
 bot.infinity_polling()
-        
