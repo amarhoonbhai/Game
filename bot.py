@@ -4,9 +4,9 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 
 # Replace with your actual bot API token, owner ID, and Telegram channel ID
-API_TOKEN = "7579121046:AAHnZYWrch85-a4D5dpoUPkt6XznsKZ_4M4"
+API_TOKEN = "7579121046:AAEiWkp_AVC6k8MTV2FNmkSv8f_Zi2GBeeE"
 BOT_OWNER_ID = 7222795580  # Replace with your Telegram user ID (owner's ID)
-CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
+CHANNEL_ID =-1002438449944  # Replace with your Telegram channel ID where characters are logged
 
 # Initialize Telegram Bot
 bot = telebot.TeleBot(API_TOKEN)
@@ -101,6 +101,7 @@ def get_rank(user_id):
 # /start command
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
+    print("/start command triggered")  # Debugging print statement
     chat_id = message.chat.id
     user_id = message.from_user.id
     user_profiles[user_id] = message.from_user.username or message.from_user.first_name
@@ -125,6 +126,7 @@ Type /help to see the full list of commands!
 # /help command - Displays available commands
 @bot.message_handler(commands=['help'])
 def show_help(message):
+    print("/help command triggered")  # Debugging print statement
     help_message = """
 ━━━━━━━━━━━━━━━━━━━━━━
 🤖 Available Commands:
@@ -146,6 +148,7 @@ def show_help(message):
 # Message handler for all text, stickers, and media messages
 @bot.message_handler(content_types=['text', 'sticker', 'photo', 'video', 'document'])
 def count_messages(message):
+    print("Message received")  # Debugging print statement
     chat_id = message.chat.id
 
     # Increment message counter for the chat
@@ -159,6 +162,7 @@ def count_messages(message):
 # /upload command - Allows the owner and admins to upload new characters
 @bot.message_handler(commands=['upload'])
 def upload_character(message):
+    print("/upload command triggered")  # Debugging print statement
     if not is_admin_or_owner(message):
         bot.reply_to(message, "❌ You do not have permission to use this command.")
         return
@@ -195,6 +199,7 @@ def upload_character(message):
 # /profile command - Show user profile with stats, streaks, achievements, and rank
 @bot.message_handler(commands=['profile'])
 def show_profile(message):
+    print("/profile command triggered")  # Debugging print statement
     user_id = message.from_user.id
     total_coins = user_coins.get(user_id, 0)
     correct_guesses = user_correct_guesses.get(user_id, 0)
@@ -215,6 +220,7 @@ def show_profile(message):
 # /leaderboard command - Shows the top users based on their coin balance
 @bot.message_handler(commands=['leaderboard'])
 def show_leaderboard(message):
+    print("/leaderboard command triggered")  # Debugging print statement
     if not user_coins:
         bot.reply_to(message, "No leaderboard data available yet.")
         return
@@ -232,6 +238,7 @@ def show_leaderboard(message):
 # /inventory command - Shows the user's collected characters
 @bot.message_handler(commands=['inventory'])
 def show_inventory(message):
+    print("/inventory command triggered")  # Debugging print statement
     user_id = message.from_user.id
     inventory = user_inventory.get(user_id, [])
     
