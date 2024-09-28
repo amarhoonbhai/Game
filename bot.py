@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 
 # Replace with your actual bot API token, owner ID, and Telegram channel ID
-API_TOKEN = "7740301929:AAHDmT4wLLhGO-L8DQ1BXKWxPex0ZYCCNrU"
+API_TOKEN = "7740301929:AAGvwp3gtrOER1rbUrN-l4jMuMan-GrI0PQ"
 BOT_OWNER_ID = 7222795580  # Replace with your Telegram user ID (owner's ID)
 CHANNEL_ID =-1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -70,12 +70,12 @@ def send_character(chat_id):
     if character:
         rarity = RARITY_LEVELS[character['rarity']]
         caption = (
-            f"🎨 **Guess the Anime Character!**\n\n"
-            f"💬 **Name**: ???\n"
-            f"⚔️ **Rarity**: {rarity} {character['rarity']}\n"
+            f"🎨 Guess the Anime Character!\n\n"
+            f"💬 Name: ???\n"
+            f"⚔️ Rarity: {rarity} {character['rarity']}\n"
             f"🌟 Can you guess this amazing character?"
         )
-        bot.send_photo(chat_id, character['image_url'], caption=caption, parse_mode='Markdown')
+        bot.send_photo(chat_id, character['image_url'], caption=caption)
     else:
         bot.send_message(chat_id, "❌ No characters available to guess at the moment.")
 
@@ -91,11 +91,11 @@ def send_welcome(message):
 
     welcome_message = """
 ━━━━━━━━━━━━━━━━━━━━━━
-**🎉 Welcome to Philo Grabber!**
+🎉 Welcome to Philo Grabber!
 
-🔮 **Philo Grabber** is the ultimate Anime Character Guessing Game! Collect, trade, and guess characters to climb the leaderboards.
+🔮 Philo Grabber is the ultimate Anime Character Guessing Game! Collect, trade, and guess characters to climb the leaderboards.
 
-✨ **Features**:
+✨ Features:
 - Daily rewards & streaks
 - Character collection & trading
 - PvP challenges, auctions, and much more!
@@ -103,29 +103,28 @@ def send_welcome(message):
 Type /help to see the full list of commands!
 ━━━━━━━━━━━━━━━━━━━━━━
 """
-    bot.reply_to(message, welcome_message, parse_mode='Markdown')
+    bot.reply_to(message, welcome_message)
 
-# /help command - Displays available commands
+# /help command - Displays available commands without Markdown
 @bot.message_handler(commands=['help'])
 def show_help(message):
     help_message = """
 ━━━━━━━━━━━━━━━━━━━━━━
-🤖 *Available Commands:*
+🤖 Available Commands:
 
 - /claim - Claim your daily reward of 10,000 coins
 - /profile - View your profile with stats and achievements
 - /inventory - View your collected characters
-- /guess \\<name\\> - Guess the current character's name
+- /guess <name> - Guess the current character's name
 - /leaderboard - Show the leaderboard with users and their coins
-- /auction \\<character_id\\> \\<starting_bid\\> - Start an auction for a character
-- /bid \\<auction_id\\> \\<bid_amount\\> - Place a bid on an ongoing auction
-- /endauction \\<auction_id\\> - End an auction and transfer the character
-- /upload \\<image_url\\> \\<character_name\\> - (Admins only) Upload a new character
-- /settitle \\<title\\> - Set a custom title for your profile
+- /auction <character_id> <starting_bid> - Start an auction for a character
+- /bid <auction_id> <bid_amount> - Place a bid on an ongoing auction
+- /endauction <auction_id> - End an auction and transfer the character
+- /upload <image_url> <character_name> - (Admins only) Upload a new character
+- /settitle <title> - Set a custom title for your profile
 ━━━━━━━━━━━━━━━━━━━━━━
 """
-    # Send the help message using Markdown
-    bot.reply_to(message, help_message, parse_mode='Markdown')
+    bot.reply_to(message, help_message)
 
 # Message handler for all text, stickers, and media messages
 @bot.message_handler(content_types=['text', 'sticker', 'photo', 'video', 'document'])
@@ -163,15 +162,15 @@ def upload_character(message):
     }
     characters.append(character)
 
-    caption = (f"📥 **New Character Uploaded**:\n\n"
-               f"💬 **Name**: {character_name}\n"
-               f"⚔️ **Rarity**: {RARITY_LEVELS[rarity]} {rarity}\n"
-               f"🔗 **Image URL**: {image_url}\n"
-               f"🆔 **ID**: {character_id}")
+    caption = (f"📥 New Character Uploaded:\n\n"
+               f"💬 Name: {character_name}\n"
+               f"⚔️ Rarity: {RARITY_LEVELS[rarity]} {rarity}\n"
+               f"🔗 Image URL: {image_url}\n"
+               f"🆔 ID: {character_id}")
     
     # Send the character to the channel
     try:
-        bot.send_photo(CHANNEL_ID, image_url, caption=caption, parse_mode='Markdown')
+        bot.send_photo(CHANNEL_ID, image_url, caption=caption)
         bot.reply_to(message, f"✅ Character '{character_name}' uploaded successfully!")
     except Exception as e:
         bot.reply_to(message, f"❌ Failed to send the character to the channel. Error: {e}")
@@ -186,13 +185,13 @@ def show_profile(message):
     inventory = user_inventory.get(user_id, [])
 
     profile_message = (
-        f"👤 **Profile**\n"
-        f"💰 **Coins**: {total_coins}\n"
-        f"✅ **Correct Guesses**: {correct_guesses}\n"
-        f"🔥 **Current Streak**: {streak}\n"
-        f"🎒 **Inventory**: {len(inventory)} characters collected\n"
+        f"👤 Profile\n"
+        f"💰 Coins: {total_coins}\n"
+        f"✅ Correct Guesses: {correct_guesses}\n"
+        f"🔥 Current Streak: {streak}\n"
+        f"🎒 Inventory: {len(inventory)} characters collected\n"
     )
-    bot.reply_to(message, profile_message, parse_mode='Markdown')
+    bot.reply_to(message, profile_message)
 
 # /leaderboard command - Shows the top users based on their coin balance
 @bot.message_handler(commands=['leaderboard'])
@@ -204,12 +203,12 @@ def show_leaderboard(message):
     # Sort the users by the number of coins in descending order
     sorted_users = sorted(user_coins.items(), key=lambda x: x[1], reverse=True)
 
-    leaderboard_message = "🏆 **Leaderboard**:\n\n"
+    leaderboard_message = "🏆 Leaderboard:\n\n"
     for rank, (user_id, coins) in enumerate(sorted_users, start=1):
         profile_name = user_profiles.get(user_id, "Unknown")
         leaderboard_message += f"{rank}. {profile_name}: {coins} coins\n"
 
-    bot.reply_to(message, leaderboard_message, parse_mode='Markdown')
+    bot.reply_to(message, leaderboard_message)
 
 # Start polling the bot
 print("Bot is polling...")
