@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7825167784:AAHAZSo9iBF5e5sYg5kBBP8CjGWVL3jXJo8"
+API_TOKEN = "7825167784:AAGn8cgrRXX6b5BiPN-kUGuSc2q5oJiv2rU"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -190,8 +190,13 @@ def show_leaderboard(message):
 
     leaderboard_message = "🏆 **Leaderboard**:\n\n"
     for rank, (user_id, coins) in enumerate(sorted_users, start=1):
-        # Ensure user profile (username or first name) is available for leaderboard
-        profile_name = user_profiles.get(user_id, "Unknown")  # Use "Unknown" if name is not available
+        # Fetch the Telegram profile name (username or first_name)
+        profile_name = user_profiles.get(user_id)
+        if not profile_name:
+            # Retrieve the profile name from the message if missing
+            profile_name = message.from_user.first_name
+            user_profiles[user_id] = profile_name
+        
         leaderboard_message += f"{rank}. {profile_name}: {coins} coins\n"
     
     bot.reply_to(message, leaderboard_message)
