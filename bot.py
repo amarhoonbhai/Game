@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7825167784:AAFrNGXECQW0CB4oT9dlHJeYHUO9RnwnFHk"
+API_TOKEN = "7825167784:AAG9ZaoDEZlPLYUba0BcEufldagKufVCfqo"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -198,12 +198,13 @@ def show_leaderboard(message):
 
     leaderboard_message = "🏆 **Top 10 Leaderboard**:\n\n"
     for rank, (user_id, coins) in enumerate(sorted_users, start=1):
-        # Fetch the Telegram profile name (username or first_name)
+        # Fetch the Telegram profile name (use username or first_name)
         profile_name = user_profiles.get(user_id)
-        if not profile_name:
-            # Retrieve the profile name from the message if missing
-            profile_name = message.from_user.first_name
-            user_profiles[user_id] = profile_name
+
+        if not profile_name:  # If not stored yet, fetch it now
+            user_info = bot.get_chat(user_id)  # Get user information from Telegram
+            profile_name = user_info.username if user_info.username else user_info.first_name
+            user_profiles[user_id] = profile_name  # Store for future use
         
         leaderboard_message += f"{rank}. {profile_name}: {coins} coins\n"
     
@@ -264,3 +265,4 @@ def handle_all_messages(message):
 
 # Start polling the bot
 bot.infinity_polling(timeout=60, long_polling_timeout=60)
+        
