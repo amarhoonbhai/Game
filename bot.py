@@ -4,9 +4,9 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 
 # Replace with your actual bot API token, owner ID, and Telegram channel ID
-API_TOKEN = "7740301929:AAEYiU9uEZbghUa3T5FyXFdaYiJuI4iV4cM"
+API_TOKEN = "7740301929:AAHDmT4wLLhGO-L8DQ1BXKWxPex0ZYCCNrU"
 BOT_OWNER_ID = 7222795580  # Replace with your Telegram user ID (owner's ID)
-CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
+CHANNEL_ID =-1002438449944  # Replace with your Telegram channel ID where characters are logged
 
 # Initialize Telegram Bot
 bot = telebot.TeleBot(API_TOKEN)
@@ -115,13 +115,13 @@ def show_help(message):
 - /claim - Claim your daily reward of 10,000 coins
 - /profile - View your profile with stats and achievements
 - /inventory - View your collected characters
-- /guess <name> - Guess the current character's name
+- /guess \\<name\\> - Guess the current character's name
 - /leaderboard - Show the leaderboard with users and their coins
-- /auction <character_id> <starting_bid> - Start an auction for a character
-- /bid <auction_id> <bid_amount> - Place a bid on an ongoing auction
-- /endauction <auction_id> - End an auction and transfer the character
-- /upload <image_url> <character_name> - (Admins only) Upload a new character
-- /settitle <title> - Set a custom title for your profile
+- /auction \\<character_id\\> \\<starting_bid\\> - Start an auction for a character
+- /bid \\<auction_id\\> \\<bid_amount\\> - Place a bid on an ongoing auction
+- /endauction \\<auction_id\\> - End an auction and transfer the character
+- /upload \\<image_url\\> \\<character_name\\> - (Admins only) Upload a new character
+- /settitle \\<title\\> - Set a custom title for your profile
 ━━━━━━━━━━━━━━━━━━━━━━
 """
     # Send the help message using Markdown
@@ -207,7 +207,7 @@ def show_leaderboard(message):
     leaderboard_message = "🏆 **Leaderboard**:\n\n"
     for rank, (user_id, coins) in enumerate(sorted_users, start=1):
         profile_name = user_profiles.get(user_id, "Unknown")
-        leaderboard_message += f"{rank}. {profile_name}: 💰 {coins} coins\n"
+        leaderboard_message += f"{rank}. {profile_name}: {coins} coins\n"
 
     bot.reply_to(message, leaderboard_message, parse_mode='Markdown')
 
