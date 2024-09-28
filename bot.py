@@ -6,7 +6,7 @@ from collections import defaultdict
 # Replace with your actual bot API token, owner ID, and Telegram channel ID
 API_TOKEN = "7740301929:AAGvwp3gtrOER1rbUrN-l4jMuMan-GrI0PQ"
 BOT_OWNER_ID = 7222795580  # Replace with your Telegram user ID (owner's ID)
-CHANNEL_ID =-1002438449944  # Replace with your Telegram channel ID where characters are logged
+CHANNEL_ID = -1002438449944   # Replace with your Telegram channel ID where characters are logged
 
 # Initialize Telegram Bot
 bot = telebot.TeleBot(API_TOKEN)
@@ -210,6 +210,6 @@ def show_leaderboard(message):
 
     bot.reply_to(message, leaderboard_message)
 
-# Start polling the bot
+# Start polling the bot with custom timeout values
 print("Bot is polling...")
-bot.infinity_polling()
+bot.infinity_polling(timeout=60, long_polling_timeout=60)
