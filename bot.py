@@ -4,9 +4,9 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7740301929:AAFcFt3PdSlpVKCO8JkcQunSu-V-tiiQjsE"
+API_TOKEN = "7740301929:AAHsWLLCkKuZoyKt0_NFPcCihIYrlE1EmOo"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
-CHANNEL_ID = - -1002438449944 # Replace with your Telegram channel ID where characters are logged
+CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
 bot = telebot.TeleBot(API_TOKEN)
 
@@ -84,6 +84,7 @@ Available Commands:
 /leaderboard - Show the leaderboard
 /upload <image_url> <character_name> - Upload a new character (Owner only)
 /delete <character_id> - Delete a character (Owner only)
+/stats - Show bot statistics (Owner only)
 """
     bot.reply_to(message, help_message)
 
@@ -185,6 +186,25 @@ def show_leaderboard(message):
         leaderboard_message += f"{rank}. {profile_name}: {coins} coins\n"
     
     bot.reply_to(message, leaderboard_message)
+
+@bot.message_handler(commands=['stats'])
+def show_stats(message):
+    # Only the owner (BOT_OWNER_ID) can see bot stats
+    if message.from_user.id != BOT_OWNER_ID:
+        bot.reply_to(message, "❌ You are not authorized to view this information.")
+        return
+
+    total_users = len(user_profiles)
+    total_coins_distributed = sum(user_coins.values())
+    total_correct_guesses = sum(user_correct_guesses.values())
+
+    stats_message = (
+        f"📊 **Bot Stats**:\n\n"
+        f"👥 Total Users: {total_users}\n"
+        f"💰 Total Coins Distributed: {total_coins_distributed}\n"
+        f"✅ Total Correct Guesses: {total_correct_guesses}"
+    )
+    bot.reply_to(message, stats_message, parse_mode='Markdown')
 
 @bot.message_handler(func=lambda message: True)
 def guess_character(message):
