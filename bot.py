@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7740301929:AAHsWLLCkKuZoyKt0_NFPcCihIYrlE1EmOo"
+API_TOKEN = "7740301929:AAGKD4fbD1m6JauNrPRh44tpXxvt29tB4ss"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -56,8 +56,6 @@ def send_character(chat_id):
             f"⚔️ Rarity: {rarity} {current_character['rarity']}\n"
         )
         bot.send_photo(chat_id, current_character['image_url'], caption=caption)
-    else:
-        bot.send_message(chat_id, "No characters available to guess.")
 
 def find_character_by_id(char_id):
     for character in characters:
@@ -221,10 +219,6 @@ def guess_character(message):
             user_inventory[user_id].append(current_character)  # Add character to user's inventory
             bot.reply_to(message, f"🎉 Congratulations! You guessed correctly and earned {COINS_PER_GUESS} coins!")
             send_character(message.chat.id)  # Send a new character after correct guess
-        else:
-            bot.reply_to(message, "❌ Wrong guess, try again!")
-    else:
-        bot.reply_to(message, "❌ No active character to guess. Please wait for the next one.")
 
 # Start polling the bot
 bot.infinity_polling(timeout=60, long_polling_timeout=60)
