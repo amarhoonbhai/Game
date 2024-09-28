@@ -1,11 +1,10 @@
 import telebot
 import random
-import logging
 from pymongo import MongoClient
 from datetime import datetime, timedelta
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7579121046:AAGDwqtzms4ZaBwwWMFp4RRMTPdjfd2wwH0"
+API_TOKEN = "7579121046:AAERaODRmIemqaWlzZwP4Isdk0P-V3R6RGA"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -21,10 +20,6 @@ groups_collection = db['groups']  # Collection for group data (tracking messages
 SUDO_USERS = [7222795580, 6180999156]  # Add user IDs of sudo users here
 
 bot = telebot.TeleBot(API_TOKEN)
-
-# Logging Setup
-logging.basicConfig(filename='bot_activity.log', level=logging.INFO, format='%(asctime)s - %(message)s')
-logging.info("Bot started.")
 
 # Settings
 BONUS_COINS = 50000  # Bonus amount for daily claim
@@ -45,6 +40,7 @@ global_message_count = 0  # Global counter for messages in all chats
 
 # Helper Functions
 def get_user_data(user_id):
+    """Fetch user data from MongoDB, or create a new entry if it doesn't exist."""
     user = users_collection.find_one({'user_id': user_id})
     if user is None:
         new_user = {
@@ -57,17 +53,19 @@ def get_user_data(user_id):
             'profile': None
         }
         users_collection.insert_one(new_user)
-        logging.info(f"New user created: {user_id}")
         return new_user
     return user
 
 def update_user_data(user_id, update_data):
+    """Update user data in MongoDB."""
     users_collection.update_one({'user_id': user_id}, {'$set': update_data})
 
 def get_character_data():
+    """Fetch all character data from the characters collection."""
     return list(characters_collection.find())
 
 def add_character(image_url, character_name, rarity):
+    """Add a new character to the MongoDB characters collection."""
     character_id = characters_collection.count_documents({}) + 1
     character = {
         'id': character_id,
@@ -76,19 +74,21 @@ def add_character(image_url, character_name, rarity):
         'rarity': rarity
     }
     characters_collection.insert_one(character)
-    logging.info(f"Character added: {character_name} (ID: {character_id}, Rarity: {rarity})")
     return character
 
 def assign_rarity():
+    """Randomly assign a rarity to a character based on pre-defined weights."""
     return random.choices(list(RARITY_LEVELS.keys()), weights=RARITY_WEIGHTS, k=1)[0]
 
 def fetch_new_character():
+    """Fetch a random character from the MongoDB collection."""
     characters = get_character_data()
     if characters:
         return random.choice(characters)
     return None
 
 def send_character(chat_id):
+    """Send a character image and details to the chat."""
     global current_character
     current_character = fetch_new_character()
     if current_character:
@@ -99,9 +99,9 @@ def send_character(chat_id):
             f"⚔️ Rarity: {rarity} {current_character['rarity']}\n"
         )
         bot.send_photo(chat_id, current_character['image_url'], caption=caption)
-        logging.info(f"Character sent to chat {chat_id}: {current_character['character_name']} (Rarity: {rarity})")
 
 def is_owner_or_sudo(user_id):
+    """Check if the user is the bot owner or a sudo user."""
     return user_id == BOT_OWNER_ID or user_id in SUDO_USERS
 
 
@@ -113,8 +113,16 @@ def send_welcome(message):
     if not user['profile']:
         profile_name = message.from_user.username or message.from_user.first_name
         update_user_data(user_id, {'profile': profile_name})
-    bot.reply_to(message, "Welcome to the Anime Character Guessing Game! Type /help for commands.")
-    logging.info(f"User {user_id} started the bot.")
+    
+    # Custom welcome message
+    welcome_message = """
+🎮 Welcome To **Philo Game**! 🎉
+👑 Owner: @TechPiro
+
+Here you can guess anime characters, earn coins, and collect your favorite characters!
+Type /help to see the list of available commands.
+"""
+    bot.reply_to(message, welcome_message, parse_mode='Markdown')
 
 @bot.message_handler(commands=['help'])
 def show_help(message):
@@ -131,7 +139,6 @@ Available Commands:
 /stats - Show bot statistics (Owner only)
 """
     bot.reply_to(message, help_message)
-    logging.info(f"User {message.from_user.id} requested /help")
 
 @bot.message_handler(commands=['bonus'])
 def claim_bonus(message):
@@ -149,31 +156,62 @@ def claim_bonus(message):
         new_coins = user['coins'] + BONUS_COINS
         update_user_data(user_id, {'coins': new_coins, 'last_bonus': now.isoformat()})
         bot.reply_to(message, f"🎉 You have received {BONUS_COINS} coins!")
-        logging.info(f"User {user_id} claimed bonus: {BONUS_COINS} coins.")
 
-@bot.message_handler(commands=['upload'])
-def upload_character(message):
-    if not is_owner_or_sudo(message.from_user.id):
-        bot.reply_to(message, "You do not have permission to upload characters.")
-        logging.warning(f"Unauthorized upload attempt by user {message.from_user.id}")
-        return
+@bot.message_handler(commands=['profile'])
+def show_profile(message):
+    user_id = message.from_user.id
+    user = get_user_data(user_id)
+    profile_message = (
+        f"Profile\nCoins: {user['coins']}\nCorrect Guesses: {user['correct_guesses']}\n"
+        f"Streak: {user['streak']}\nInventory: {len(user['inventory'])} characters"
+    )
+    bot.reply_to(message, profile_message)
 
-    try:
-        _, image_url, character_name = message.text.split(maxsplit=2)
-    except ValueError:
-        bot.reply_to(message, "Format: /upload <image_url> <character_name>")
-        return
+@bot.message_handler(commands=['inventory'])
+def show_inventory(message):
+    user_id = message.from_user.id
+    user = get_user_data(user_id)
+    inventory = user['inventory']
 
-    rarity = assign_rarity()
-    character = add_character(image_url, character_name, rarity)
-    bot.send_message(CHANNEL_ID, f"New character uploaded: {character_name} (ID: {character['id']}, {RARITY_LEVELS[rarity]} {rarity})")
-    bot.reply_to(message, f"✅ Character '{character_name}' uploaded successfully with ID {character['id']}!")
+    if not inventory:
+        bot.reply_to(message, "Your inventory is empty. Start guessing characters to collect them!")
+    else:
+        inventory_by_rarity = {
+            'Common': [],
+            'Rare': [],
+            'Epic': [],
+            'Legendary': []
+        }
+
+        # Group characters by rarity
+        for character in inventory:
+            inventory_by_rarity[character['rarity']].append(character)
+
+        inventory_message = f"🎒 **{user['profile']}**'s Character Collection:\n\n"
+
+        # Display characters by rarity
+        for rarity, characters in inventory_by_rarity.items():
+            if characters:
+                inventory_message += f"🔹 **{RARITY_LEVELS[rarity]} {rarity} Characters**:\n"
+                for i, character in enumerate(characters, 1):
+                    inventory_message += f"{i}. {character['character_name']}\n"
+                inventory_message += "\n"
+
+        bot.reply_to(message, inventory_message)
+
+@bot.message_handler(commands=['leaderboard'])
+def show_leaderboard(message):
+    users = users_collection.find().sort('coins', -1).limit(10)
+    leaderboard_message = "🏆 **Top 10 Leaderboard**:\n\n"
+    for rank, user in enumerate(users, start=1):
+        leaderboard_message += f"{rank}. {user['profile']}: {user['coins']} coins\n"
+    
+    bot.reply_to(message, leaderboard_message)
 
 @bot.message_handler(commands=['delete'])
 def delete_character(message):
     if message.from_user.id != BOT_OWNER_ID:
         bot.reply_to(message, "You do not have permission to delete characters.")
-        logging.warning(f"Unauthorized delete attempt by user {message.from_user.id}")
         return
 
     try:
@@ -187,12 +225,60 @@ def delete_character(message):
     if character:
         characters_collection.delete_one({'id': char_id})
         bot.reply_to(message, f"✅ Character with ID {char_id} ('{character['character_name']}') has been deleted.")
-        logging.info(f"Character deleted: {char_id}")
     else:
         bot.reply_to(message, f"❌ Character with ID {char_id} not found.")
-        logging.warning(f"Character delete attempt failed, ID {char_id} not found.")
 
-# The rest of the bot code remains the same...
+@bot.message_handler(commands=['stats'])
+def show_stats(message):
+    if message.from_user.id != BOT_OWNER_ID:
+        bot.reply_to(message, "❌ You are not authorized to view this information.")
+        return
+
+    total_users = users_collection.count_documents({})
+    total_coins_distributed = sum([user['coins'] for user in users_collection.find()])
+    total_correct_guesses = sum([user['correct_guesses'] for user in users_collection.find()])
+
+    stats_message = (
+        f"📊 **Bot Stats**:\n\n"
+        f"👥 Total Users: {total_users}\n"
+        f"💰 Total Coins Distributed: {total_coins_distributed}\n"
+        f"✅ Total Correct Guesses: {total_correct_guesses}"
+    )
+    bot.reply_to(message, stats_message)
+
+# Handle all types of messages and increment the message counter
+@bot.message_handler(func=lambda message: True)
+def handle_all_messages(message):
+    global global_message_count
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    user_guess = message.text.strip().lower() if message.text else ""
+
+    global_message_count += 1
+
+    if global_message_count >= MESSAGE_THRESHOLD:
+        send_character(chat_id)
+        global_message_count = 0
+
+    if current_character:
+        character_name = current_character['character_name'].strip().lower()
+        if user_guess in character_name:
+            user = get_user_data(user_id)
+            new_coins = user['coins'] + COINS_PER_GUESS
+            user['correct_guesses'] += 1
+            user['streak'] += 1
+            streak_bonus = STREAK_BONUS_COINS * user['streak']
+            update_user_data(user_id, {
+                'coins': new_coins + streak_bonus,
+                'correct_guesses': user['correct_guesses'],
+                'streak': user['streak'],
+                'inventory': user['inventory'] + [current_character]
+            })
+            bot.reply_to(message, f"🎉 Congratulations! You guessed correctly and earned {COINS_PER_GUESS} coins!\n"
+                                  f"🔥 Streak Bonus: {streak_bonus} coins for a {user['streak']}-guess streak!")
+            send_character(chat_id)
+        else:
+            update_user_data(user_id, {'streak': 0})
 
 # Start polling the bot
 bot.infinity_polling(timeout=60, long_polling_timeout=60)
