@@ -4,8 +4,8 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7579121046:AAH9h-xJhNXHnTLUJEOJhhj4osGFkNk3zZM"
-BOT_OWNER_ID = 7140556192  # Replace with the owner’s Telegram ID
+API_TOKEN = "7579121046:AAGO9viTNnRmRIcCklF1M5xlevZIbjVuDqM"
+BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
 bot = telebot.TeleBot(API_TOKEN)
@@ -46,15 +46,16 @@ def fetch_new_character():
     return None
 
 def send_character(chat_id):
-    character = fetch_new_character()
-    if character:
-        rarity = RARITY_LEVELS[character['rarity']]
+    global current_character
+    current_character = fetch_new_character()
+    if current_character:
+        rarity = RARITY_LEVELS[current_character['rarity']]
         caption = (
             f"🎨 Guess the Anime Character!\n\n"
             f"💬 Name: ???\n"
-            f"⚔️ Rarity: {rarity} {character['rarity']}\n"
+            f"⚔️ Rarity: {rarity} {current_character['rarity']}\n"
         )
-        bot.send_photo(chat_id, character['image_url'], caption=caption)
+        bot.send_photo(chat_id, current_character['image_url'], caption=caption)
     else:
         bot.send_message(chat_id, "No characters available to guess.")
 
@@ -176,18 +177,29 @@ def show_leaderboard(message):
     sorted_users = sorted(user_coins.items(), key=lambda x: x[1], reverse=True)
     leaderboard_message = "🏆 Leaderboard:\n"
     for rank, (user_id, coins) in enumerate(sorted_users, start=1):
-        profile_name = user_profiles.get(user_id, "Unknown")
+        profile_name = user_profiles.get(user_id, "Unknown")  # Fetch the username or "Unknown" if not available
         leaderboard_message += f"{rank}. {profile_name}: {coins} coins\n"
     bot.reply_to(message, leaderboard_message)
 
-@bot.message_handler(content_types=['text', 'sticker', 'photo', 'video', 'document'])
-def count_messages(message):
-    chat_id = message.chat.id
-    message_counter[chat_id] += 1
+@bot.message_handler(func=lambda message: True)
+def guess_character(message):
+    global current_character
+    user_id = message.from_user.id
+    user_guess = message.text.strip().lower()  # Convert guess to lowercase and trim spaces
 
-    if message_counter[chat_id] >= 5:  # After 5 messages, send a new character
-        send_character(chat_id)
-        message_counter[chat_id] = 0
+    if current_character:
+        character_name = current_character['character_name'].strip().lower()  # Trim spaces and convert to lowercase
+
+        if user_guess == character_name:
+            add_coins(user_id, COINS_PER_GUESS)
+            user_correct_guesses[user_id] += 1
+            user_inventory[user_id].append(current_character)  # Add character to user's inventory
+            bot.reply_to(message, f"🎉 Congratulations! You guessed correctly and earned {COINS_PER_GUESS} coins!")
+            send_character(message.chat.id)  # Send a new character after correct guess
+        else:
+            bot.reply_to(message, "❌ Wrong guess, try again!")
+    else:
+        bot.reply_to(message, "❌ No active character to guess. Please wait for the next one.")
 
 # Start polling the bot
 bot.infinity_polling(timeout=60, long_polling_timeout=60)
