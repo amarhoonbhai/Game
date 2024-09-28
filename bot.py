@@ -4,9 +4,9 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 
 # Replace with your actual bot API token, owner ID, and Telegram channel ID
-API_TOKEN = "7740301929:AAFj1SHj_MLbqk7zyfPg02bX2uTWbtgNL_k"
+API_TOKEN = "7579121046:AAHnZYWrch85-a4D5dpoUPkt6XznsKZ_4M4"
 BOT_OWNER_ID = 7222795580  # Replace with your Telegram user ID (owner's ID)
-CHANNEL_ID = -1002438449944   # Replace with your Telegram channel ID where characters are logged
+CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
 # Initialize Telegram Bot
 bot = telebot.TeleBot(API_TOKEN)
@@ -25,6 +25,15 @@ current_character = None
 auctions = {}  # Track ongoing character auctions
 auction_id_counter = 1  # Track auction IDs
 message_counter = defaultdict(int)  # Track the number of messages per chat
+
+# Ranking thresholds based on the number of correct guesses
+RANKS = {
+    'Beginner': 0,
+    'Intermediate': 10,
+    'Expert': 25,
+    'Master': 50,
+    'Legend': 100
+}
 
 DAILY_REWARD_COINS = 10000  # Coins given as a daily reward
 COINS_PER_GUESS = 50  # Coins awarded for correct guesses
@@ -79,6 +88,14 @@ def send_character(chat_id):
     else:
         bot.send_message(chat_id, "❌ No characters available to guess at the moment.")
 
+def get_rank(user_id):
+    """Determine the user's rank based on the number of correct guesses."""
+    correct_guesses = user_correct_guesses.get(user_id, 0)
+    for rank, threshold in sorted(RANKS.items(), key=lambda x: x[1], reverse=True):
+        if correct_guesses >= threshold:
+            return rank
+    return 'Beginner'
+
 ### Command Handlers ###
 
 # /start command
@@ -105,7 +122,7 @@ Type /help to see the full list of commands!
 """
     bot.reply_to(message, welcome_message)
 
-# /help command - Displays available commands without Markdown
+# /help command - Displays available commands
 @bot.message_handler(commands=['help'])
 def show_help(message):
     help_message = """
@@ -175,7 +192,7 @@ def upload_character(message):
     except Exception as e:
         bot.reply_to(message, f"❌ Failed to send the character to the channel. Error: {e}")
 
-# /profile command - Show user profile with stats, streaks, and achievements
+# /profile command - Show user profile with stats, streaks, achievements, and rank
 @bot.message_handler(commands=['profile'])
 def show_profile(message):
     user_id = message.from_user.id
@@ -183,6 +200,7 @@ def show_profile(message):
     correct_guesses = user_correct_guesses.get(user_id, 0)
     streak = user_streaks.get(user_id, 0)
     inventory = user_inventory.get(user_id, [])
+    rank = get_rank(user_id)
 
     profile_message = (
         f"👤 Profile\n"
@@ -190,6 +208,7 @@ def show_profile(message):
         f"✅ Correct Guesses: {correct_guesses}\n"
         f"🔥 Current Streak: {streak}\n"
         f"🎒 Inventory: {len(inventory)} characters collected\n"
+        f"🎖️ Rank: {rank}\n"
     )
     bot.reply_to(message, profile_message)
 
@@ -210,6 +229,22 @@ def show_leaderboard(message):
 
     bot.reply_to(message, leaderboard_message)
 
-# Start polling the bot with custom timeout values
+# /inventory command - Shows the user's collected characters
+@bot.message_handler(commands=['inventory'])
+def show_inventory(message):
+    user_id = message.from_user.id
+    inventory = user_inventory.get(user_id, [])
+    
+    if not inventory:
+        bot.reply_to(message, "Your inventory is empty. Start guessing characters to collect them!")
+        return
+    
+    inventory_message = f"🎒 **Your Character Collection** ({len(inventory)} characters):\n"
+    for i, character in enumerate(inventory, 1):
+        inventory_message += f"{i}. {character['character_name']} ({character['rarity']})\n"
+
+    bot.reply_to(message, inventory_message)
+
+# Start polling the bot
 print("Bot is polling...")
 bot.infinity_polling(timeout=60, long_polling_timeout=60)
