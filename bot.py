@@ -6,12 +6,12 @@ from datetime import datetime, timedelta
 import os
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7825167784:AAES3h0yneJOOjBP-dvDVcEeY2HqAlDq-UI"
+API_TOKEN = "7825167784:AAEdfxofgk8D7ppDkgUXayFJ4rOyYnAuNGQ"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
 # List of sudo users (user IDs)
-SUDO_USERS = [7222795580, 1234567890]  # Add user IDs of sudo users here
+SUDO_USERS = [7222795580, 6180999156]  # Add user IDs of sudo users here
 
 bot = telebot.TeleBot(API_TOKEN)
 
