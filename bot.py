@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7825167784:AAGn8cgrRXX6b5BiPN-kUGuSc2q5oJiv2rU"
+API_TOKEN = "7825167784:AAFeXDAATGadSvcP0sVZKa6lYfQec2t3X1E"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -16,6 +16,7 @@ user_profiles = {}  # User profiles (username or first_name)
 user_correct_guesses = defaultdict(int)  # Track correct guesses
 user_inventory = defaultdict(list)  # Collected characters
 user_last_bonus = {}  # Track last bonus claim time
+user_streak = defaultdict(int)  # Track user guess streak
 characters = []  # List of uploaded characters (with ID)
 current_character = None
 message_counter = defaultdict(int)  # Track message count per chat
@@ -27,6 +28,7 @@ global_message_count = 0  # Global counter for messages in all chats
 BONUS_COINS = 50000  # Bonus amount for daily claim
 BONUS_INTERVAL = timedelta(days=1)  # Bonus claim interval (24 hours)
 COINS_PER_GUESS = 50  # Coins for correct guesses
+STREAK_BONUS_COINS = 1000  # Additional coins for continuing a streak
 RARITY_LEVELS = {
     'Common': '⭐',
     'Rare': '🌟',
@@ -156,9 +158,10 @@ def show_profile(message):
     coins = user_coins[user_id]
     correct_guesses = user_correct_guesses[user_id]
     inventory_count = len(user_inventory[user_id])
+    streak = user_streak[user_id]  # Show streak
 
     profile_message = (
-        f"Profile\nCoins: {coins}\nCorrect Guesses: {correct_guesses}\nInventory: {inventory_count} characters"
+        f"Profile\nCoins: {coins}\nCorrect Guesses: {correct_guesses}\nStreak: {streak}\nInventory: {inventory_count} characters"
     )
     bot.reply_to(message, profile_message)
 
@@ -176,7 +179,7 @@ def show_inventory(message):
             key = (character['character_name'], character['rarity'])
             inventory_count[key] = inventory_count.get(key, 0) + 1
 
-        inventory_message = f"🎒 **{user_profiles.get(user_id, 'Unknown')}**'s Character Collection:\n"
+        inventory_message = f"🎒 **{user_profiles.get(user_id)}**'s Character Collection:\n"
         for i, ((character_name, rarity), count) in enumerate(inventory_count.items(), 1):
             # Display character with a count if more than one is owned
             inventory_message += f"{i}. {character_name} ({rarity}) x{count if count > 1 else ''}\n"
@@ -186,9 +189,9 @@ def show_inventory(message):
 @bot.message_handler(commands=['leaderboard'])
 def show_leaderboard(message):
     # Sort users by coins in descending order
-    sorted_users = sorted(user_coins.items(), key=lambda x: x[1], reverse=True)
+    sorted_users = sorted(user_coins.items(), key=lambda x: x[1], reverse=True)[:10]  # Top 10 users only
 
-    leaderboard_message = "🏆 **Leaderboard**:\n\n"
+    leaderboard_message = "🏆 **Top 10 Leaderboard**:\n\n"
     for rank, (user_id, coins) in enumerate(sorted_users, start=1):
         # Fetch the Telegram profile name (username or first_name)
         profile_name = user_profiles.get(user_id)
@@ -242,9 +245,17 @@ def handle_all_messages(message):
         if user_guess in character_name:  # Partial match
             add_coins(user_id, COINS_PER_GUESS)
             user_correct_guesses[user_id] += 1
+            user_streak[user_id] += 1  # Increment streak
             user_inventory[user_id].append(current_character)  # Add character to user's inventory
-            bot.reply_to(message, f"🎉 Congratulations! You guessed correctly and earned {COINS_PER_GUESS} coins!")
+            
+            # Reward streak bonus
+            streak_bonus = STREAK_BONUS_COINS * user_streak[user_id]
+            add_coins(user_id, streak_bonus)
+            bot.reply_to(message, f"🎉 Congratulations! You guessed correctly and earned {COINS_PER_GUESS} coins!\n"
+                                  f"🔥 Streak Bonus: {streak_bonus} coins for a {user_streak[user_id]}-guess streak!")
             send_character(chat_id)  # Send a new character after correct guess
+        else:
+            user_streak[user_id] = 0  # Reset the streak if the guess is wrong
 
 # Start polling the bot
 bot.infinity_polling(timeout=60, long_polling_timeout=60)
