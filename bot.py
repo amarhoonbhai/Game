@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7825167784:AAHcDzATm3zqK5ZQ6l00FJxwhAd1gswbfuE"
+API_TOKEN = "7825167784:AAFa__O4E0ZIs4bI9GhPbvrqbz3vV0n5dyQ"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -82,7 +82,6 @@ Available Commands:
 /bonus - Claim your daily reward (50,000 coins every 24 hours)
 /profile - View your profile
 /inventory - View your collected characters
-/guess <name> - Guess the character's name
 /leaderboard - Show the leaderboard
 /upload <image_url> <character_name> - Upload a new character (Owner only)
 /delete <character_id> - Delete a character (Owner only)
@@ -227,7 +226,7 @@ def handle_all_messages(message):
     # Check if the user is guessing the character
     if current_character:
         character_name = current_character['character_name'].strip().lower()
-        if user_guess == character_name:
+        if user_guess in character_name:  # Partial match
             add_coins(user_id, COINS_PER_GUESS)
             user_correct_guesses[user_id] += 1
             user_inventory[user_id].append(current_character)  # Add character to user's inventory
