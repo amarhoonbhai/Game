@@ -105,12 +105,12 @@ Type /help to see the full list of commands!
 """
     bot.reply_to(message, welcome_message, parse_mode='Markdown')
 
-# /help command
+# /help command - Displays available commands
 @bot.message_handler(commands=['help'])
 def show_help(message):
     help_message = """
 ━━━━━━━━━━━━━━━━━━━━━━
-🤖 **Available Commands:**
+🤖 *Available Commands:*
 
 - /claim - Claim your daily reward of 10,000 coins
 - /profile - View your profile with stats and achievements
@@ -124,6 +124,7 @@ def show_help(message):
 - /settitle <title> - Set a custom title for your profile
 ━━━━━━━━━━━━━━━━━━━━━━
 """
+    # Send the help message using Markdown
     bot.reply_to(message, help_message, parse_mode='Markdown')
 
 # Message handler for all text, stickers, and media messages
