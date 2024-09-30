@@ -4,7 +4,7 @@ from pymongo import MongoClient
 from datetime import datetime, timedelta
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7579121046:AAH--VFVJ7SHO36qdyg2xRLpocm79bqCuJM"
+API_TOKEN = "7579121046:AAHaIUX0MFwus8e3LN2nKJUh4OsxdyEZEoc"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -26,10 +26,10 @@ BONUS_INTERVAL = timedelta(days=1)  # Bonus claim interval (24 hours)
 COINS_PER_GUESS = 50  # Coins for correct guesses
 STREAK_BONUS_COINS = 1000  # Additional coins for continuing a streak
 RARITY_LEVELS = {
-    'Common': '⭐',
-    'Rare': '🌟',
-    'Epic': '💫',
-    'Legendary': '✨'
+    'Common': '🕊️',
+    'Epic': '🌟',
+    'Legendary': '🍷',
+    'Mythical': '🔮'
 }
 RARITY_WEIGHTS = [60, 25, 10, 5]
 MESSAGE_THRESHOLD = 5  # Number of messages before sending a new character
@@ -85,11 +85,12 @@ def send_character(chat_id):
     if current_character:
         rarity = RARITY_LEVELS[current_character['rarity']]
         caption = (
-            f"🎨 Guess the Anime Character!\n\n"
-            f"💬 Name: ???\n"
-            f"⚔️ Rarity: {rarity} {current_character['rarity']}\n"
+            f"🎨 **New Character Appeared!**\n\n"
+            f"💬 **Name**: ???\n"
+            f"⚔️ **Rarity**: {rarity} {current_character['rarity']}\n"
+            f"✨ Guess the character to earn coins and add them to your collection!"
         )
-        bot.send_photo(chat_id, current_character['image_url'], caption=caption)
+        bot.send_photo(chat_id, current_character['image_url'], caption=caption, parse_mode="Markdown")
 
 def is_owner_or_sudo(user_id):
     return user_id == BOT_OWNER_ID or user_id in SUDO_USERS
@@ -154,6 +155,10 @@ def claim_bonus(message):
         update_user_data(user_id, {'coins': new_coins, 'last_bonus': now.isoformat()})
         bot.reply_to(message, f"🎉 You have received {BONUS_COINS} coins!")
 
+        # Set a reminder for the next bonus
+        reminder_time = (now + BONUS_INTERVAL).isoformat()
+        bot.send_message(user_id, f"🔔 Reminder set! You can claim your next bonus after {reminder_time}.")
+
 @bot.message_handler(commands=['upload'])
 def upload_character(message):
     if not is_owner_or_sudo(message.from_user.id):
@@ -212,9 +217,9 @@ def show_inventory(message):
     else:
         inventory_by_rarity = {
             'Common': [],
-            'Rare': [],
             'Epic': [],
-            'Legendary': []
+            'Legendary': [],
+            'Mythical': []
         }
 
         # Group characters by rarity
@@ -227,10 +232,16 @@ def show_inventory(message):
         for rarity, characters in inventory_by_rarity.items():
             if characters:
                 inventory_message += f"🔹 **{RARITY_LEVELS[rarity]} {rarity} Characters**:\n"
-                for i, character in enumerate(characters, 1):
-                    count = user['inventory'].count(character)
-                    inventory_message += f"{i}. {character['character_name']} ×{count}\n"
-                inventory_message += "\n"
+                unique_inventory = {}
+                for character in characters:
+                    key = (character['character_name'], character['rarity'])
+                    if key in unique_inventory:
+                        unique_inventory[key] += 1
+                    else:
+                        unique_inventory[key] = 1
+
+                for (character_name, rarity), count in unique_inventory.items():
+                    inventory_message += f"🔹 {RARITY_LEVELS[rarity]} {rarity} Character: {character_name} ×{count}\n"
 
         bot.reply_to(message, inventory_message)
 
@@ -291,7 +302,7 @@ def handle_all_messages(message):
                 'inventory': user['inventory'] + [current_character]
             })
             bot.reply_to(message, f"🎉 Congratulations! You guessed correctly and earned {COINS_PER_GUESS} coins!\n"
-                        
+          
           f"🔥 Streak Bonus: {streak_bonus} coins for a {user['streak']}-guess streak!")
             send_character(chat_id)
         else:
