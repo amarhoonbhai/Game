@@ -4,7 +4,7 @@ from pymongo import MongoClient
 from datetime import datetime, timedelta
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7579121046:AAHaIUX0MFwus8e3LN2nKJUh4OsxdyEZEoc"
+API_TOKEN = "7579121046:AAHdY5NDzp_6IHCv7Z5dQTKwaVoinNAxjx0"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -155,10 +155,6 @@ def claim_bonus(message):
         update_user_data(user_id, {'coins': new_coins, 'last_bonus': now.isoformat()})
         bot.reply_to(message, f"🎉 You have received {BONUS_COINS} coins!")
 
-        # Set a reminder for the next bonus
-        reminder_time = (now + BONUS_INTERVAL).isoformat()
-        bot.send_message(user_id, f"🔔 Reminder set! You can claim your next bonus after {reminder_time}.")
-
 @bot.message_handler(commands=['upload'])
 def upload_character(message):
     if not is_owner_or_sudo(message.from_user.id):
@@ -228,7 +224,7 @@ def show_inventory(message):
 
         inventory_message = f"🎒 **{user['profile']}**'s Character Collection:\n\n"
 
-        # Display characters by rarity
+        # Display characters by rarity without duplicates
         for rarity, characters in inventory_by_rarity.items():
             if characters:
                 inventory_message += f"🔹 **{RARITY_LEVELS[rarity]} {rarity} Characters**:\n"
@@ -302,7 +298,7 @@ def handle_all_messages(message):
                 'inventory': user['inventory'] + [current_character]
             })
             bot.reply_to(message, f"🎉 Congratulations! You guessed correctly and earned {COINS_PER_GUESS} coins!\n"
-          
+                  
           f"🔥 Streak Bonus: {streak_bonus} coins for a {user['streak']}-guess streak!")
             send_character(chat_id)
         else:
