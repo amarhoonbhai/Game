@@ -4,7 +4,7 @@ from pymongo import MongoClient
 from datetime import datetime, timedelta
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7579121046:AAFX3SvFQ7rK4EWNQnW6Ugop6UBtDDsupjE"
+API_TOKEN = "7579121046:AAFCAnCCWXuy_ecntmAsWGxi0-eVWYcLe3E"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -105,7 +105,7 @@ def send_welcome(message):
         profile_name = message.from_user.full_name
         update_user_data(user_id, {'profile': profile_name})
 
-    # Custom welcome message with @TechPiro mention
+    # Custom welcome message with @TechPiro mention and help included
     welcome_message = """
 🎮 **Welcome to Philo Game!**
 🛠️ Bot created by: @TechPiro
@@ -118,10 +118,41 @@ Here are the available commands to help you get started:
 - /upload <image_url> <character_name> - Upload a new character (Owner and Sudo users only).
 - /delete <character_id> - Delete a character (Owner only).
 - /stats - View bot statistics (Owner only).
-
+    
 Start playing now and guess the anime characters to earn coins!
 """
     bot.send_message(message.chat.id, welcome_message, parse_mode="Markdown")
+
+@bot.message_handler(commands=['help'])
+def show_help(message):
+    help_message = """
+Available Commands:
+/bonus - Claim your daily reward (50,000 coins every 24 hours)
+/profile - View your profile
+/harem - View your collected characters (grouped by rarity)
+/leaderboard - Show the top 10 leaderboard
+/upload <image_url> <character_name> - Upload a new character (Owner and Sudo users only)
+/delete <character_id> - Delete a character (Owner only)
+/stats - Show bot statistics (Owner only)
+"""
+    bot.reply_to(message, help_message)
+
+@bot.message_handler(commands=['bonus'])
+def claim_bonus(message):
+    user_id = message.from_user.id
+    user = get_user_data(user_id)
+    now = datetime.now()
+
+    if user['last_bonus'] and now - datetime.fromisoformat(user['last_bonus']) < BONUS_INTERVAL:
+        next_claim = datetime.fromisoformat(user['last_bonus']) + BONUS_INTERVAL
+        remaining_time = next_claim - now
+        hours_left = remaining_time.seconds // 3600
+        minutes_left = (remaining_time.seconds % 3600) // 60
+        bot.reply_to(message, f"You can claim your next bonus in {hours_left} hours and {minutes_left} minutes.")
+    else:
+        new_coins = user['coins'] + BONUS_COINS
+        update_user_data(user_id, {'coins': new_coins, 'last_bonus': now.isoformat()})
+        bot.reply_to(message, f"🎉 You have received {BONUS_COINS} coins!")
 
 @bot.message_handler(commands=['harem'])
 def show_harem(message):
@@ -213,7 +244,7 @@ def handle_all_messages(message):
                 'inventory': user['inventory'] + [current_character]
             })
             bot.reply_to(message, f"🎉 Congratulations! You guessed correctly and earned {COINS_PER_GUESS} coins!\n"
-                                  f"🔥 Streak Bonus: {streak_bonus} coins for a {user['streak']}-guess streak!")
+          f"🔥 Streak Bonus: {streak_bonus} coins for a {user['streak']}-guess streak!")
             send_character(chat_id)
         else:
             update_user_data(user_id, {'streak': 0})
