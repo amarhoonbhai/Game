@@ -4,7 +4,7 @@ from pymongo import MongoClient
 from datetime import datetime, timedelta
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7579121046:AAEWP_RDt5h4M0WizwoDWjR5Wb4staOUA1E"
+API_TOKEN = "7579121046:AAE_K3KHoHLSlpmNKida6wM6eRzLZXAhuA0"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
