@@ -4,12 +4,12 @@ from pymongo import MongoClient
 from datetime import datetime, timedelta
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7579121046:AAFCAnCCWXuy_ecntmAsWGxi0-eVWYcLe3E"
+API_TOKEN = "7579121046:AAF_vFaCjkktmBLisSvN5SarlfH8OdWCS3k"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
 # MongoDB Connection
-MONGO_URI = "mongodb+srv://PhiloWise:Philo@waifu.yl9tohm.mongodb.net/?retryWrites=true&w=majority&appName=Waifu"
+MONGO_URI = "YOUR_MONGO_DB_URI"
 client = MongoClient(MONGO_URI)
 db = client['philo_grabber']  # Database name
 users_collection = db['users']  # Collection for user data
@@ -35,6 +35,15 @@ RARITY_WEIGHTS = [60, 25, 10, 5]
 MESSAGE_THRESHOLD = 5  # Number of messages before sending a new character
 current_character = None
 global_message_count = 0  # Global counter for messages in all chats
+
+# Titles and ranks based on achievements
+TITLES = {
+    'newbie': {'guesses': 0, 'title': 'Newbie'},
+    'beginner': {'guesses': 10, 'title': 'Beginner'},
+    'intermediate': {'guesses': 50, 'title': 'Intermediate'},
+    'pro': {'guesses': 100, 'title': 'Pro Guesser'},
+    'legendary': {'guesses': 500, 'title': 'Legendary Guesser'}
+}
 
 # Helper Functions
 def get_user_data(user_id):
@@ -94,6 +103,12 @@ def send_character(chat_id):
 def is_owner_or_sudo(user_id):
     return user_id == BOT_OWNER_ID or user_id in SUDO_USERS
 
+def get_user_rank(guesses):
+    for rank, data in TITLES.items():
+        if guesses >= data['guesses']:
+            title = data['title']
+    return title
+
 # Command Handlers
 
 @bot.message_handler(commands=['start'])
@@ -115,8 +130,11 @@ Here are the available commands to help you get started:
 - /profile - View your profile including your stats.
 - /harem - Check out the characters you've collected, grouped by rarity.
 - /leaderboard - See the top players with the most coins.
+- /topcoins - See the top players with the highest coins.
 - /upload <image_url> <character_name> - Upload a new character (Owner and Sudo users only).
 - /delete <character_id> - Delete a character (Owner only).
+- /gift <user_id> <character_id> - Gift a character to another user.
+- /sendcoins <user_id> <amount> - Send coins to another user.
 - /stats - View bot statistics (Owner only).
     
 Start playing now and guess the anime characters to earn coins!
@@ -130,124 +148,93 @@ Available Commands:
 /bonus - Claim your daily reward (50,000 coins every 24 hours)
 /profile - View your profile
 /harem - View your collected characters (grouped by rarity)
-/leaderboard - Show the top 10 leaderboard
+/leaderboard - Show the top 10 fastest guessers
+/topcoins - Show the top 10 users with the highest coins
 /upload <image_url> <character_name> - Upload a new character (Owner and Sudo users only)
 /delete <character_id> - Delete a character (Owner only)
+/gift <user_id> <character_id> - Gift a character to another user
+/sendcoins <user_id> <amount> - Send coins to another user
 /stats - Show bot statistics (Owner only)
 """
     bot.reply_to(message, help_message)
 
-@bot.message_handler(commands=['bonus'])
-def claim_bonus(message):
-    user_id = message.from_user.id
-    user = get_user_data(user_id)
-    now = datetime.now()
+@bot.message_handler(commands=['gift'])
+def gift_character(message):
+    try:
+        _, target_user_id_str, character_id_str = message.text.split(maxsplit=2)
+        target_user_id = int(target_user_id_str)
+        character_id = int(character_id_str)
 
-    if user['last_bonus'] and now - datetime.fromisoformat(user['last_bonus']) < BONUS_INTERVAL:
-        next_claim = datetime.fromisoformat(user['last_bonus']) + BONUS_INTERVAL
-        remaining_time = next_claim - now
-        hours_left = remaining_time.seconds // 3600
-        minutes_left = (remaining_time.seconds % 3600) // 60
-        bot.reply_to(message, f"You can claim your next bonus in {hours_left} hours and {minutes_left} minutes.")
-    else:
-        new_coins = user['coins'] + BONUS_COINS
-        update_user_data(user_id, {'coins': new_coins, 'last_bonus': now.isoformat()})
-        bot.reply_to(message, f"🎉 You have received {BONUS_COINS} coins!")
+        # Fetch sender and target user data
+        sender_id = message.from_user.id
+        sender_data = get_user_data(sender_id)
+        target_data = get_user_data(target_user_id)
 
-@bot.message_handler(commands=['harem'])
-def show_harem(message):
-    user_id = message.from_user.id
-    user = get_user_data(user_id)
-    inventory = user['inventory']
+        # Find character in sender's inventory
+        character = next((char for char in sender_data['inventory'] if char['id'] == character_id), None)
+        if character:
+            # Transfer character from sender to target
+            sender_data['inventory'].remove(character)
+            target_data['inventory'].append(character)
+            update_user_data(sender_id, {'inventory': sender_data['inventory']})
+            update_user_data(target_user_id, {'inventory': target_data['inventory']})
+            
+            bot.reply_to(message, f"🎁 You have successfully gifted {character['character_name']} to {target_data['profile']}!")
+        else:
+            bot.reply_to(message, "❌ Character not found in your inventory.")
+    except (ValueError, IndexError):
+        bot.reply_to(message, "Usage: /gift <user_id> <character_id>")
 
-    if not inventory:
-        bot.reply_to(message, "Your harem is empty. Start guessing characters to collect them!")
-    else:
-        inventory_by_rarity = {
-            'Common': [],
-            'Epic': [],
-            'Legendary': [],
-            'Mythical': []
-        }
+@bot.message_handler(commands=['sendcoins'])
+def send_coins(message):
+    try:
+        _, target_user_id_str, amount_str = message.text.split(maxsplit=2)
+        target_user_id = int(target_user_id_str)
+        amount = int(amount_str)
 
-        # Group characters by rarity and remove duplicates
-        unique_inventory = {}
-        for character in inventory:
-            key = (character['character_name'], character['rarity'], character['image_url'])
-            if key in unique_inventory:
-                unique_inventory[key] += 1
-            else:
-                unique_inventory[key] = 1
+        sender_id = message.from_user.id
+        sender_data = get_user_data(sender_id)
+        target_data = get_user_data(target_user_id)
 
-        # Display characters by rarity with images
-        for rarity, emoji in RARITY_LEVELS.items():
-            characters = [(k[0], k[2], v) for k, v in unique_inventory.items() if k[1] == rarity]
-            if characters:
-                bot.send_message(message.chat.id, f"🔹 **{emoji} {rarity} Characters**:", parse_mode="Markdown")
-                for character_name, image_url, count in characters:
-                    caption = f"{character_name} ×{count}"
-                    bot.send_photo(message.chat.id, image_url, caption=caption)
+        if sender_data['coins'] >= amount:
+            sender_data['coins'] -= amount
+            target_data['coins'] += amount
+            update_user_data(sender_id, {'coins': sender_data['coins']})
+            update_user_data(target_user_id, {'coins': target_data['coins']})
+            bot.reply_to(message, f"💸 You have successfully sent {amount} coins to {target_data['profile']}!")
+        else:
+            bot.reply_to(message, "❌ You do not have enough coins.")
+    except (ValueError, IndexError):
+        bot.reply_to(message, "Usage: /sendcoins <user_id> <amount>")
 
 @bot.message_handler(commands=['leaderboard'])
 def show_leaderboard(message):
-    users = users_collection.find().sort('coins', -1).limit(10)
-    leaderboard_message = "🏆 **Top 10 Leaderboard**:\n\n"
+    # Top 10 fastest guessers
+    users = users_collection.find().sort('correct_guesses', -1).limit(10)
+    leaderboard_message = "🏆 **Top 10 Fastest Guessers**:\n\n"
     for rank, user in enumerate(users, start=1):
-        leaderboard_message += f"{rank}. **{user['profile']}**: {user['coins']} coins\n"
-    
+        leaderboard_message += f"{rank}. [{user['profile']}](tg://user?id={user['user_id']}): {user['correct_guesses']} correct guesses\n"
     bot.reply_to(message, leaderboard_message, parse_mode="Markdown")
 
-@bot.message_handler(commands=['stats'])
-def show_stats(message):
-    if message.from_user.id != BOT_OWNER_ID:
-        bot.reply_to(message, "❌ You are not authorized to view this information.")
-        return
+@bot.message_handler(commands=['topcoins'])
+def show_topcoins(message):
+    # Top 10 users with highest coins
+    users = users_collection.find().sort('coins', -1).limit(10)
+    topcoins_message = "🏆 **Top 10 Users with Highest Coins**:\n\n"
+    for rank, user in enumerate(users, start=1):
+        topcoins_message += f"{rank}. [{user['profile']}](tg://user?id={user['user_id']}): {user['coins']} coins\n"
+    bot.reply_to(message, topcoins_message, parse_mode="Markdown")
 
-    total_users = users_collection.count_documents({})
-    total_coins_distributed = sum([user['coins'] for user in users_collection.find()])
-    total_correct_guesses = sum([user['correct_guesses'] for user in users_collection.find()])
-
-    stats_message = (
-        f"📊 **Bot Stats**:\n\n"
-        f"👥 Total Users: {total_users}\n"
-        f"💰 Total Coins Distributed: {total_coins_distributed}\n"
-        f"✅ Total Correct Guesses: {total_correct_guesses}"
-    )
-    bot.reply_to(message, stats_message, parse_mode='Markdown')
-
-# Handle all types of messages and increment the message counter
-@bot.message_handler(func=lambda message: True)
-def handle_all_messages(message):
-    global global_message_count
-    chat_id = message.chat.id
+@bot.message_handler(commands=['profile'])
+def show_profile(message):
     user_id = message.from_user.id
-    user_guess = message.text.strip().lower() if message.text else ""
-
-    global_message_count += 1
-
-    if global_message_count >= MESSAGE_THRESHOLD:
-        send_character(chat_id)
-        global_message_count = 0
-
-    if current_character:
-        character_name = current_character['character_name'].strip().lower()
-        if user_guess in character_name:
-            user = get_user_data(user_id)
-            new_coins = user['coins'] + COINS_PER_GUESS
-            user['correct_guesses'] += 1
-            user['streak'] += 1
-            streak_bonus = STREAK_BONUS_COINS * user['streak']
-            update_user_data(user_id, {
-                'coins': new_coins + streak_bonus,
-                'correct_guesses': user['correct_guesses'],
-                'streak': user['streak'],
-                'inventory': user['inventory'] + [current_character]
-            })
-            bot.reply_to(message, f"🎉 Congratulations! You guessed correctly and earned {COINS_PER_GUESS} coins!\n"
-          f"🔥 Streak Bonus: {streak_bonus} coins for a {user['streak']}-guess streak!")
-            send_character(chat_id)
-        else:
-            update_user_data(user_id, {'streak': 0})
+    user = get_user_data(user_id)
+    user_rank = get_user_rank(user['correct_guesses'])
+    profile_message = (
+        f"Profile\nCoins: {user['coins']}\nCorrect Guesses: {user['correct_guesses']}\n"
+        f"Streak: {user['streak']}\nTitle: {user_rank}\nInventory: {len(user['inventory'])} characters"
+    )
+    bot.reply_to(message, profile_message)
 
 # Start polling the bot
 bot.infinity_polling(timeout=60, long_polling_timeout=60)
