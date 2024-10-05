@@ -133,7 +133,7 @@ def send_welcome(message):
 - /inventory - Check out the characters you've collected, grouped by rarity.
 - /leaderboard - See the top players with the most correct guesses.
 - /topcoins - See the top players with the most coins.
-- /gift @username <amount> - Gift coins to another user by their username.
+- /gift - Gift coins to another user by tagging them.
 - /upload <image_url> <character_name> - Upload a new character (Owner and Sudo users only).
 - /delete <character_id> - Delete a character (Owner only).
 - /stats - View bot statistics (Owner only).
@@ -153,72 +153,29 @@ def show_help(message):
 /inventory - View your collected characters, grouped by rarity.
 /leaderboard - Show the top 10 users with the most correct guesses and their most collected character.
 /topcoins - Show the top 10 users with the most coins.
-/gift @username <amount> - Gift coins to another user by their username.
+/gift - Gift coins to another user by tagging them.
 /upload <image_url> <character_name> - Upload a new character (Owner and Sudo users only).
 /delete <character_id> - Delete a character (Owner only).
 /stats - View bot statistics (Owner only).
 """
     bot.reply_to(message, help_message, parse_mode="Markdown")
 
-# Updated /leaderboard command
-@bot.message_handler(commands=['leaderboard'])
-def show_leaderboard(message):
-    users = users_collection.find().sort('correct_guesses', -1).limit(10)
-    leaderboard_message = "🏆 **Top 10 Leaderboard (Correct Guesses)**:\n\n"
-    
-    for rank, user in enumerate(users, start=1):
-        # Get the user's most collected character by counting occurrences
-        inventory = user.get('inventory', [])
-        if inventory:
-            # Group characters by name and find the most common
-            character_counts = {}
-            for character in inventory:
-                character_name = character['character_name']
-                if character_name in character_counts:
-                    character_counts[character_name] += 1
-                else:
-                    character_counts[character_name] = 1
-            # Find the most collected character
-            most_collected_character = max(character_counts, key=character_counts.get)
-        else:
-            most_collected_character = "No characters collected"
-
-        user_link = f"[{user['profile']}](tg://user?id={user['user_id']})"
-        leaderboard_message += (
-            f"{rank}. {user_link}: {user['correct_guesses']} correct guesses, "
-            f"Most Collected Character: {most_collected_character}\n"
-        )
-    
-    bot.reply_to(message, leaderboard_message, parse_mode='Markdown')
-
-# New /topcoins command: show users with the highest coin count
-@bot.message_handler(commands=['topcoins'])
-def show_topcoins(message):
-    users = users_collection.find().sort('coins', -1).limit(10)
-    topcoins_message = "💰 **Top 10 Users by Coins**:\n\n"
-    
-    for rank, user in enumerate(users, start=1):
-        user_link = f"[{user['profile']}](tg://user?id={user['user_id']})"
-        topcoins_message += f"{rank}. {user_link}: {user['coins']} coins\n"
-    
-    bot.reply_to(message, topcoins_message, parse_mode='Markdown')
-
-# New /gift command to gift coins to other users by username
+# Updated /gift command to gift coins by tagging users
 @bot.message_handler(commands=['gift'])
 def gift_coins(message):
     user_id = message.from_user.id
     user = get_user_data(user_id)
     
-    try:
-        # Format: /gift @username <amount>
-        _, recipient_username, amount_str = message.text.split(maxsplit=2)
-        amount = int(amount_str)
+    if not message.reply_to_message or not message.reply_to_message.from_user:
+        bot.reply_to(message, "❌ Please reply to the user you want to gift coins to.")
+        return
 
-        # Remove the '@' from the username
-        if recipient_username.startswith('@'):
-            recipient_username = recipient_username[1:]
-    except ValueError:
-        bot.reply_to(message, "❌ Format: /gift @username <amount>")
+    try:
+        # Extract the user ID from the tagged reply
+        recipient_id = message.reply_to_message.from_user.id
+        amount = int(message.text.split()[1])  # Expecting: /gift <amount>
+    except (IndexError, ValueError):
+        bot.reply_to(message, "❌ Format: /gift <amount> (tag the user)")
         return
 
     # Ensure the sender has enough coins to gift
@@ -226,22 +183,22 @@ def gift_coins(message):
         bot.reply_to(message, "❌ You don't have enough coins to gift!")
         return
 
-    # Check if the recipient exists in the database based on the username
-    recipient = users_collection.find_one({'profile': recipient_username})
+    # Check if the recipient exists in the database
+    recipient = get_user_data(recipient_id)
     if recipient is None:
-        bot.reply_to(message, f"❌ User @{recipient_username} not found!")
+        bot.reply_to(message, "❌ Recipient not found!")
         return
 
     # Update the sender and recipient's coins
     new_sender_coins = user['coins'] - amount
     new_recipient_coins = recipient['coins'] + amount
     update_user_data(user_id, {'coins': new_sender_coins})
-    update_user_data(recipient['user_id'], {'coins': new_recipient_coins})
+    update_user_data(recipient_id, {'coins': new_recipient_coins})
 
     # Notify both users
-    bot.reply_to(message, f"🎁 You gifted {amount} coins to @{recipient_username}!")
+    bot.reply_to(message, f"🎁 You gifted {amount} coins to {message.reply_to_message.from_user.first_name}!")
     try:
-        bot.send_message(recipient['user_id'], f"🎉 You received {amount} coins from @{user['profile']}!")
+        bot.send_message(recipient_id, f"🎉 You received {amount} coins from {message.from_user.first_name}!")
     except:
         pass  # In case the recipient blocks the bot or there is an error
 
