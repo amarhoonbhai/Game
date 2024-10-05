@@ -5,20 +5,23 @@ from datetime import datetime, timedelta
 from threading import Timer
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7579121046:AAGx4aNTaSmxTR1Kxs8rg5OCYJ7uM-CW4y8"
+API_TOKEN = "7579121046:AAE76QWdMNjZ6MGuki_Z7c5mX9fNAHa5lbE"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
 # MongoDB Connection
 MONGO_URI = "mongodb+srv://PhiloWise:Philo@waifu.yl9tohm.mongodb.net/?retryWrites=true&w=majority&appName=Waifu"
-client = MongoClient(MONGO_URI)
-db = client['philo_grabber']  # Database name
-users_collection = db['users']  # Collection for user data
-characters_collection = db['characters']  # Collection for character data
+try:
+    client = MongoClient(MONGO_URI)
+    db = client['philo_grabber']  # Database name
+    users_collection = db['users']  # Collection for user data
+    characters_collection = db['characters']  # Collection for character data
+    print("Connected to MongoDB")
+except Exception as e:
+    print(f"Failed to connect to MongoDB: {e}")
+    exit()  # Exit if connection fails
 
-# List of sudo users (user IDs)
-SUDO_USERS = [7222795580, 6180999156]  # Add user IDs of sudo users here
-
+# Initialize the bot
 bot = telebot.TeleBot(API_TOKEN)
 
 # Settings
@@ -26,13 +29,6 @@ BONUS_COINS = 50000  # Bonus amount for daily claim
 BONUS_INTERVAL = timedelta(days=1)  # Bonus claim interval (24 hours)
 COINS_PER_GUESS = 50  # Coins for correct guesses
 STREAK_BONUS_COINS = 1000  # Additional coins for continuing a streak
-RARITY_LEVELS = {
-    'Common': '⭐',
-    'Rare': '🌟',
-    'Epic': '💫',
-    'Legendary': '✨'
-}
-RARITY_WEIGHTS = [60, 25, 10, 5]
 MESSAGE_THRESHOLD = 5  # Number of messages before sending a new character
 current_character = None
 global_message_count = 0  # Global counter for messages in all chats
@@ -73,7 +69,7 @@ def add_character(image_url, character_name, rarity):
     return character
 
 def assign_rarity():
-    return random.choices(list(RARITY_LEVELS.keys()), weights=RARITY_WEIGHTS, k=1)[0]
+    return random.choices(['Common', 'Rare', 'Epic', 'Legendary'], weights=[60, 25, 10, 5], k=1)[0]
 
 def fetch_new_character():
     characters = get_character_data()
@@ -85,7 +81,7 @@ def send_character(chat_id):
     global current_character
     current_character = fetch_new_character()
     if current_character:
-        rarity = RARITY_LEVELS[current_character['rarity']]
+        rarity = current_character['rarity']
         caption = (
             f"🎨 Guess the Anime Character!\n\n"
             f"💬 Name: ???\n"
@@ -93,10 +89,7 @@ def send_character(chat_id):
         )
         bot.send_photo(chat_id, current_character['image_url'], caption=caption)
 
-def is_owner_or_sudo(user_id):
-    return user_id == BOT_OWNER_ID or user_id in SUDO_USERS
-
-# Reminder system for claiming bonus
+# Bonus reminder system
 def send_bonus_reminder():
     now = datetime.now()
     users = users_collection.find()
@@ -113,7 +106,8 @@ def send_bonus_reminder():
 # Start the bonus reminder loop
 send_bonus_reminder()
 
-# /start Welcome Message with Developer Mention
+# Command Handlers
+
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     user_id = message.from_user.id
@@ -142,25 +136,26 @@ def send_welcome(message):
 """
     bot.send_message(message.chat.id, welcome_message, parse_mode="Markdown")
 
-# Updated /help command to list all available commands
 @bot.message_handler(commands=['help'])
 def show_help(message):
     help_message = """
 💡 **Available Commands**:
-/start - Welcome message and bot introduction.
-/bonus - Claim your daily reward of coins (50,000 coins every 24 hours).
-/profile - View your profile with your stats and streaks.
+/start - Start the bot and receive a welcome message.
+/help - Get help about the available commands.
+/ping - Check if the bot is responsive.
+/bonus - Claim your daily reward (50,000 coins every 24 hours).
+/profile - View your profile with stats and streaks.
 /inventory - View your collected characters, grouped by rarity.
-/leaderboard - Show the top 10 users with the most correct guesses and their most collected character.
-/topcoins - Show the top 10 users with the most coins.
+/leaderboard - Show the top users by correct guesses and their most collected character.
+/topcoins - Show the top users by total coins.
 /gift - Gift coins to another user by tagging them.
-/upload <image_url> <character_name> - Upload a new character (Owner and Sudo users only).
-/delete <character_id> - Delete a character (Owner only).
-/stats - View bot statistics (Owner only).
 """
-    bot.send_message(message.chat.id, help_message, parse_mode="Markdown")
+    bot.send_message(message.chat.id, help_message)
 
-# Updated /bonus command with claim reminder in mind
+@bot.message_handler(commands=['ping'])
+def ping(message):
+    bot.reply_to(message, "Pong!")
+
 @bot.message_handler(commands=['bonus'])
 def claim_bonus(message):
     user_id = message.from_user.id
@@ -178,7 +173,6 @@ def claim_bonus(message):
         update_user_data(user_id, {'coins': new_coins, 'last_bonus': now.isoformat()})
         bot.reply_to(message, f"🎉 You have received {BONUS_COINS} coins!")
 
-# Updated /gift command to gift coins by tagging users
 @bot.message_handler(commands=['gift'])
 def gift_coins(message):
     user_id = message.from_user.id
@@ -220,6 +214,49 @@ def gift_coins(message):
     except:
         pass  # In case the recipient blocks the bot or there is an error
 
+# Leaderboard command
+@bot.message_handler(commands=['leaderboard'])
+def show_leaderboard(message):
+    users = users_collection.find().sort('correct_guesses', -1).limit(10)
+    leaderboard_message = "🏆 **Top 10 Leaderboard (Correct Guesses)**:\n\n"
+    
+    for rank, user in enumerate(users, start=1):
+        # Get the user's most collected character by counting occurrences
+        inventory = user.get('inventory', [])
+        if inventory:
+            # Group characters by name and find the most common
+            character_counts = {}
+            for character in inventory:
+                character_name = character['character_name']
+                if character_name in character_counts:
+                    character_counts[character_name] += 1
+                else:
+                    character_counts[character_name] = 1
+            # Find the most collected character
+            most_collected_character = max(character_counts, key=character_counts.get)
+        else:
+            most_collected_character = "No characters collected"
+
+        user_link = f"[{user['profile']}](tg://user?id={user['user_id']})"
+        leaderboard_message += (
+            f"{rank}. {user_link}: {user['correct_guesses']} correct guesses, "
+            f"Most Collected Character: {most_collected_character}\n"
+        )
+    
+    bot.reply_to(message, leaderboard_message, parse_mode='Markdown')
+
+# Top coins command
+@bot.message_handler(commands=['topcoins'])
+def show_topcoins(message):
+    users = users_collection.find().sort('coins', -1).limit(10)
+    topcoins_message = "💰 **Top 10 Users by Coins**:\n\n"
+    
+    for rank, user in enumerate(users, start=1):
+        user_link = f"[{user['profile']}](tg://user?id={user['user_id']})"
+        topcoins_message += f"{rank}. {user_link}: {user['coins']} coins\n"
+    
+    bot.reply_to(message, topcoins_message, parse_mode='Markdown')
+
 # Handle all types of messages and increment the message counter
 @bot.message_handler(func=lambda message: True)
 def handle_all_messages(message):
@@ -255,4 +292,5 @@ def handle_all_messages(message):
             update_user_data(user_id, {'streak': 0})
 
 # Start polling the bot
-bot.infinity_polling(timeout=60, long_polling_timeout=60)
+print("Bot is running...")
+bot.infinity_polling(timeout=10, long_polling_timeout=5)
