@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from threading import Timer
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7579121046:AAHvMnEugexDxWso2lemjFLFIu5OkaJYcxM"
+API_TOKEN = "7579121046:AAGx4aNTaSmxTR1Kxs8rg5OCYJ7uM-CW4y8"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -158,7 +158,25 @@ def show_help(message):
 /delete <character_id> - Delete a character (Owner only).
 /stats - View bot statistics (Owner only).
 """
-    bot.reply_to(message, help_message, parse_mode="Markdown")
+    bot.send_message(message.chat.id, help_message, parse_mode="Markdown")
+
+# Updated /bonus command with claim reminder in mind
+@bot.message_handler(commands=['bonus'])
+def claim_bonus(message):
+    user_id = message.from_user.id
+    user = get_user_data(user_id)
+    now = datetime.now()
+
+    if user['last_bonus'] and now - datetime.fromisoformat(user['last_bonus']) < BONUS_INTERVAL:
+        next_claim = datetime.fromisoformat(user['last_bonus']) + BONUS_INTERVAL
+        remaining_time = next_claim - now
+        hours_left = remaining_time.seconds // 3600
+        minutes_left = (remaining_time.seconds % 3600) // 60
+        bot.reply_to(message, f"You can claim your next bonus in {hours_left} hours and {minutes_left} minutes.")
+    else:
+        new_coins = user['coins'] + BONUS_COINS
+        update_user_data(user_id, {'coins': new_coins, 'last_bonus': now.isoformat()})
+        bot.reply_to(message, f"🎉 You have received {BONUS_COINS} coins!")
 
 # Updated /gift command to gift coins by tagging users
 @bot.message_handler(commands=['gift'])
@@ -201,24 +219,6 @@ def gift_coins(message):
         bot.send_message(recipient_id, f"🎉 You received {amount} coins from {message.from_user.first_name}!")
     except:
         pass  # In case the recipient blocks the bot or there is an error
-
-# Updated /bonus command with claim reminder in mind
-@bot.message_handler(commands=['bonus'])
-def claim_bonus(message):
-    user_id = message.from_user.id
-    user = get_user_data(user_id)
-    now = datetime.now()
-
-    if user['last_bonus'] and now - datetime.fromisoformat(user['last_bonus']) < BONUS_INTERVAL:
-        next_claim = datetime.fromisoformat(user['last_bonus']) + BONUS_INTERVAL
-        remaining_time = next_claim - now
-        hours_left = remaining_time.seconds // 3600
-        minutes_left = (remaining_time.seconds % 3600) // 60
-        bot.reply_to(message, f"You can claim your next bonus in {hours_left} hours and {minutes_left} minutes.")
-    else:
-        new_coins = user['coins'] + BONUS_COINS
-        update_user_data(user_id, {'coins': new_coins, 'last_bonus': now.isoformat()})
-        bot.reply_to(message, f"🎉 You have received {BONUS_COINS} coins!")
 
 # Handle all types of messages and increment the message counter
 @bot.message_handler(func=lambda message: True)
