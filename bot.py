@@ -1,10 +1,11 @@
 import telebot
+import random
 from pymongo import MongoClient
 from datetime import datetime, timedelta
 from threading import Timer
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7579121046:AAHyHs2r0hKD__XzrvNGVkslE79MabnSAI8"
+API_TOKEN = "7579121046:AAGTrCIc5IyQ7SFJzXGZmtqBmqjppzz7Jkc"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -85,26 +86,13 @@ def send_character(chat_id):
         caption = (
             f"🎨 Guess the Anime Character!\n\n"
             f"💬 Name: ???\n"
-            f"⚔️ Rarity: {rarity} {current_character['rarity']}\n"
+            f"⚔️ Rarity: {rarity}\n"
         )
-        bot.send_photo(chat_id, current_character['image_url'], caption=caption)
-
-# Bonus reminder system
-def send_bonus_reminder():
-    now = datetime.now()
-    users = users_collection.find()
-    for user in users:
-        if user['last_bonus']:
-            last_bonus_time = datetime.fromisoformat(user['last_bonus'])
-            if now - last_bonus_time >= BONUS_INTERVAL:
-                try:
-                    bot.send_message(user['user_id'], "⏰ Don't forget to claim your daily bonus using /bonus!")
-                except:
-                    continue  # In case the user blocks the bot or there is an error
-    Timer(REMINDER_INTERVAL, send_bonus_reminder).start()
-
-# Start the bonus reminder loop
-send_bonus_reminder()
+        try:
+            bot.send_photo(chat_id, current_character['image_url'], caption=caption)
+        except Exception as e:
+            print(f"Error sending character image: {e}")
+            bot.send_message(chat_id, "❌ Unable to send character image.")
 
 # Command Handlers
 
@@ -136,27 +124,7 @@ def send_welcome(message):
 """
     bot.send_message(message.chat.id, welcome_message, parse_mode="Markdown")
 
-@bot.message_handler(commands=['profile'])
-def show_profile(message):
-    user_id = message.from_user.id
-    user = users_collection.find_one({'user_id': user_id})
-    
-    if user is None:
-        bot.reply_to(message, "You don't have a profile yet. Please interact with the bot to create one.")
-        return
-
-    profile_message = (
-        f"👤 **Profile**\n"
-        f"👤 Name: {user.get('profile', 'Unknown User')}\n"
-        f"💰 Coins: {user.get('coins', 0)}\n"
-        f"✅ Correct Guesses: {user.get('correct_guesses', 0)}\n"
-        f"🔥 Streak: {user.get('streak', 0)}\n"
-        f"🎒 Inventory Size: {len(user.get('inventory', []))} characters\n"
-    )
-    
-    bot.reply_to(message, profile_message, parse_mode='Markdown')
-
-# Stylish and clean /inventory command
+# Clean and stylish /inventory command (with extra space between sections)
 @bot.message_handler(commands=['inventory'])
 def show_inventory(message):
     user_id = message.from_user.id
@@ -186,10 +154,9 @@ def show_inventory(message):
 
     # Start with a stylish header
     inventory_message = f"""
-    <b>🌟 {user.get('profile', 'Unknown User')}'s Personal Character Vault 🌟</b>\n
-    <i>Step into the realm of greatness and witness the power of your collection!</i>\n\n
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n
-    """
+<b>🌟 {user.get('profile', 'Unknown User')}'s Personal Character Vault 🌟</b>\n
+<i>Step into the realm of greatness and witness the power of your collection!</i>\n\n
+"""
 
     # Rarity title with style
     rarity_titles = {
@@ -205,125 +172,12 @@ def show_inventory(message):
             inventory_message += f"🔹 {rarity_titles[rarity]}:\n"
             for character_name, count in characters.items():
                 inventory_message += f"  • <b>{character_name}</b> ×<b>{count}</b>\n"
-            inventory_message += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            inventory_message += "\n"  # Add space between rarity sections
 
     # Add a motivational footer
     inventory_message += "<i>🔥 Forge ahead, your legend awaits. Continue collecting and dominate the realms! 🔥</i>"
 
     bot.reply_to(message, inventory_message, parse_mode='HTML')
-
-@bot.message_handler(commands=['stats'])
-def show_stats(message):
-    if message.from_user.id != BOT_OWNER_ID:
-        bot.reply_to(message, "❌ You are not authorized to view this information.")
-        return
-
-    total_users = users_collection.count_documents({})
-    total_coins_distributed = sum(user['coins'] for user in users_collection.find())
-    total_correct_guesses = sum(user['correct_guesses'] for user in users_collection.find())
-
-    stats_message = (
-        f"📊 **Bot Stats**:\n\n"
-        f"👥 Total Users: {total_users}\n"
-        f"💰 Total Coins Distributed: {total_coins_distributed}\n"
-        f"✅ Total Correct Guesses: {total_correct_guesses}"
-    )
-    
-    bot.reply_to(message, stats_message)
-
-@bot.message_handler(commands=['bonus'])
-def claim_bonus(message):
-    user_id = message.from_user.id
-    user = get_user_data(user_id)
-    now = datetime.now()
-
-    if user['last_bonus'] and now - datetime.fromisoformat(user['last_bonus']) < BONUS_INTERVAL:
-        next_claim = datetime.fromisoformat(user['last_bonus']) + BONUS_INTERVAL
-        remaining_time = next_claim - now
-        hours_left = remaining_time.seconds // 3600
-        minutes_left = (remaining_time.seconds % 3600) // 60
-        bot.reply_to(message, f"You can claim your next bonus in {hours_left} hours and {minutes_left} minutes.")
-    else:
-        new_coins = user['coins'] + BONUS_COINS
-        update_user_data(user_id, {'coins': new_coins, 'last_bonus': now.isoformat()})
-        bot.reply_to(message, f"🎉 You have received {BONUS_COINS} coins!")
-
-@bot.message_handler(commands=['gift'])
-def gift_coins(message):
-    user_id = message.from_user.id
-    user = get_user_data(user_id)
-    
-    if not message.reply_to_message or not message.reply_to_message.from_user:
-        bot.reply_to(message, "❌ Please reply to the user you want to gift coins to.")
-        return
-
-    try:
-        recipient_id = message.reply_to_message.from_user.id
-        amount = int(message.text.split()[1])  # Expecting: /gift <amount>
-    except (IndexError, ValueError):
-        bot.reply_to(message, "❌ Format: /gift <amount> (tag the user)")
-        return
-
-    if user['coins'] < amount:
-        bot.reply_to(message, "❌ You don't have enough coins to gift!")
-        return
-
-    recipient = get_user_data(recipient_id)
-    if recipient is None:
-        bot.reply_to(message, "❌ Recipient not found!")
-        return
-
-    new_sender_coins = user['coins'] - amount
-    new_recipient_coins = recipient['coins'] + amount
-    update_user_data(user_id, {'coins': new_sender_coins})
-    update_user_data(recipient_id, {'coins': new_recipient_coins})
-
-    bot.reply_to(message, f"🎁 You gifted {amount} coins to {message.reply_to_message.from_user.first_name}!")
-    try:
-        bot.send_message(recipient_id, f"🎉 You received {amount} coins from {message.from_user.first_name}!")
-    except:
-        pass  # In case the recipient blocks the bot or there is an error
-
-# Leaderboard command
-@bot.message_handler(commands=['leaderboard'])
-def show_leaderboard(message):
-    users = users_collection.find().sort('correct_guesses', -1).limit(10)
-    leaderboard_message = "🏆 **Top 10 Leaderboard (Correct Guesses)**:\n\n"
-    
-    for rank, user in enumerate(users, start=1):
-        first_name = user.get('profile', 'Unknown User')
-        username = user.get('username', None)
-        inventory = user.get('inventory', [])
-        most_collected_character = max({character['character_name']: inventory.count(character['character_name']) for character in inventory}, default="No characters collected")
-
-        if username:
-            user_link = f'<a href="https://t.me/{username}"><b>{first_name}</b></a>'
-        else:
-            user_link = f'<b>{first_name}</b>'
-
-        leaderboard_message += f"{rank}. {user_link}: {user['correct_guesses']} correct guesses, Most Collected Character: {most_collected_character}\n"
-    
-    bot.send_message(message.chat.id, leaderboard_message, parse_mode="HTML")
-
-# Top coins command
-@bot.message_handler(commands=['topcoins'])
-def show_topcoins(message):
-    users = users_collection.find().sort('coins', -1).limit(10)
-    topcoins_message = "💰 **Top 10 Users by Coins**:\n\n"
-    
-    for rank, user in enumerate(users, start=1):
-        first_name = user.get('profile', 'Unknown User')
-        username = user.get('username', None)
-        inventory_count = len(user.get('inventory', []))
-
-        if username:
-            user_link = f'<a href="https://t.me/{username}"><b>{first_name}</b></a>'
-        else:
-            user_link = f'<b>{first_name}</b>'
-
-        topcoins_message += f'{rank}. {user_link} ➾ <b>{user["coins"]}</b> coins, {inventory_count} characters collected\n'
-    
-    bot.send_message(message.chat.id, topcoins_message, parse_mode="HTML")
 
 # Handle all types of messages and increment the message counter
 @bot.message_handler(func=lambda message: True)
