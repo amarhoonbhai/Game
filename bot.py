@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from threading import Timer
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7579121046:AAGrEu5v3_Lwk5rdWk7FAwgqLtxm7fuvybY"
+API_TOKEN = "7579121046:AAHI7PVLkvBl3V8F3alUHgTGq8xIpI5Sqh8"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -16,6 +16,7 @@ try:
     db = client['philo_grabber']  # Database name
     users_collection = db['users']  # Collection for user data
     characters_collection = db['characters']  # Collection for character data
+    groups_collection = db['groups']  # Collection for group stats
     print("Connected to MongoDB")
 except Exception as e:
     print(f"Failed to connect to MongoDB: {e}")
@@ -55,44 +56,20 @@ def get_user_data(user_id):
 def update_user_data(user_id, update_data):
     users_collection.update_one({'user_id': user_id}, {'$set': update_data})
 
-def get_character_data():
-    return list(characters_collection.find())
+def get_group_data(group_id):
+    group = groups_collection.find_one({'group_id': group_id})
+    if group is None:
+        new_group = {
+            'group_id': group_id,
+            'group_name': None,
+            'message_count': 0
+        }
+        groups_collection.insert_one(new_group)
+        return new_group
+    return group
 
-def add_character(image_url, character_name, rarity):
-    character_id = characters_collection.count_documents({}) + 1
-    character = {
-        'id': character_id,
-        'image_url': image_url,
-        'character_name': character_name,
-        'rarity': rarity
-    }
-    characters_collection.insert_one(character)
-    return character
-
-def assign_rarity():
-    return random.choices(['Common', 'Rare', 'Epic', 'Legendary'], weights=[60, 25, 10, 5], k=1)[0]
-
-def fetch_new_character():
-    characters = get_character_data()
-    if characters:
-        return random.choice(characters)
-    return None
-
-def send_character(chat_id):
-    global current_character
-    current_character = fetch_new_character()
-    if current_character:
-        rarity = current_character['rarity']
-        caption = (
-            f"🎨 Guess the Anime Character!\n\n"
-            f"💬 Name: ???\n"
-            f"⚔️ Rarity: {rarity}\n"
-        )
-        try:
-            bot.send_photo(chat_id, current_character['image_url'], caption=caption)
-        except Exception as e:
-            print(f"Error sending character image: {e}")
-            bot.send_message(chat_id, "❌ Unable to send character image.")
+def update_group_data(group_id, update_data):
+    groups_collection.update_one({'group_id': group_id}, {'$set': update_data})
 
 # Command Handlers
 
@@ -273,15 +250,22 @@ def show_stats(message):
         bot.reply_to(message, "❌ You are not authorized to view this information.")
         return
 
+    # User stats
     total_users = users_collection.count_documents({})
     total_coins_distributed = sum(user['coins'] for user in users_collection.find())
     total_correct_guesses = sum(user['correct_guesses'] for user in users_collection.find())
+
+    # Group stats
+    total_groups = groups_collection.count_documents({})
+    total_group_messages = sum(group['message_count'] for group in groups_collection.find())
 
     stats_message = (
         f"📊 **Bot Stats**:\n\n"
         f"👥 Total Users: {total_users}\n"
         f"💰 Total Coins Distributed: {total_coins_distributed}\n"
-        f"✅ Total Correct Guesses: {total_correct_guesses}"
+        f"✅ Total Correct Guesses: {total_correct_guesses}\n\n"
+        f"👥 Total Groups: {total_groups}\n"
+        f"💬 Total Group Messages: {total_group_messages}"
     )
     
     bot.send_message(message.chat.id, stats_message)
@@ -292,6 +276,14 @@ def handle_all_messages(message):
     global global_message_count
     chat_id = message.chat.id
     user_id = message.from_user.id
+
+    # Check if the message is from a group or user chat
+    if message.chat.type in ['group', 'supergroup']:
+        # Group message, update the group data
+        group_data = get_group_data(chat_id)
+        new_message_count = group_data['message_count'] + 1
+        update_group_data(chat_id, {'message_count': new_message_count})
+    
     user_guess = message.text.strip().lower() if message.text else ""
 
     global_message_count += 1
@@ -300,7 +292,7 @@ def handle_all_messages(message):
         send_character(chat_id)
         global_message_count = 0
 
-    if current_character:
+    if current_character and user_guess:
         character_name = current_character['character_name'].strip().lower()
         if user_guess in character_name:
             user = get_user_data(user_id)
@@ -323,4 +315,3 @@ def handle_all_messages(message):
 # Start polling the bot
 print("Bot is running...")
 bot.infinity_polling(timeout=10, long_polling_timeout=5)
-    
