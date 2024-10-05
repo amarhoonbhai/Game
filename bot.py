@@ -5,12 +5,12 @@ from datetime import datetime, timedelta
 from threading import Timer
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7579121046:AAET1KRghrNdO5C391BuWiEHQn7LSHkfPbg"
+API_TOKEN = "7579121046:AAHvMnEugexDxWso2lemjFLFIu5OkaJYcxM"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
 # MongoDB Connection
-MONGO_URI = "YOUR_MONGO_URI"
+MONGO_URI = "mongodb+srv://PhiloWise:Philo@waifu.yl9tohm.mongodb.net/?retryWrites=true&w=majority&appName=Waifu"
 client = MongoClient(MONGO_URI)
 db = client['philo_grabber']  # Database name
 users_collection = db['users']  # Collection for user data
