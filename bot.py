@@ -1,11 +1,10 @@
 import telebot
-import random
 from pymongo import MongoClient
 from datetime import datetime, timedelta
 from threading import Timer
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7579121046:AAGahqRivO-rcgred96fLRaUcsXPbpLnDqA"
+API_TOKEN = "7579121046:AAHyHs2r0hKD__XzrvNGVkslE79MabnSAI8"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -157,36 +156,61 @@ def show_profile(message):
     
     bot.reply_to(message, profile_message, parse_mode='Markdown')
 
+# Stylish and clean /inventory command
 @bot.message_handler(commands=['inventory'])
 def show_inventory(message):
     user_id = message.from_user.id
     user = users_collection.find_one({'user_id': user_id})
 
     if user is None or not user.get('inventory'):
-        bot.reply_to(message, "Your inventory is empty. Start guessing characters to collect them!")
+        bot.reply_to(message, "🚨 <b>Your inventory is empty!</b> Start collecting characters and build your collection.")
         return
 
+    # Group characters by rarity and count occurrences
     inventory_by_rarity = {
-        'Common': [],
-        'Rare': [],
-        'Epic': [],
-        'Legendary': []
+        'Common': {},
+        'Rare': {},
+        'Epic': {},
+        'Legendary': {}
     }
 
-    # Group characters by rarity
     for character in user['inventory']:
         rarity = character.get('rarity', 'Unknown')
-        inventory_by_rarity[rarity].append(character['character_name'])
+        character_name = character['character_name']
+        
+        # Count the characters
+        if character_name in inventory_by_rarity[rarity]:
+            inventory_by_rarity[rarity][character_name] += 1
+        else:
+            inventory_by_rarity[rarity][character_name] = 1
 
-    inventory_message = f"🎒 **{user.get('profile', 'Unknown User')}**'s Character Collection:\n\n"
-    
-    # Display characters by rarity
+    # Start with a stylish header
+    inventory_message = f"""
+    <b>🌟 {user.get('profile', 'Unknown User')}'s Personal Character Vault 🌟</b>\n
+    <i>Step into the realm of greatness and witness the power of your collection!</i>\n\n
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n
+    """
+
+    # Rarity title with style
+    rarity_titles = {
+        'Common': '<b>Common</b> — The Foundation of Heroes',
+        'Rare': '<b>Rare</b> — The Shining Elite',
+        'Epic': '<b>Epic</b> — The Champions of Legends',
+        'Legendary': '<b>Legendary</b> — The Immortal Mythics'
+    }
+
+    # Construct the message for each rarity
     for rarity, characters in inventory_by_rarity.items():
         if characters:
-            inventory_message += f"🔹 **{rarity}** ({len(characters)} characters):\n"
-            inventory_message += "\n".join([f"- {char}" for char in characters]) + "\n\n"
-    
-    bot.reply_to(message, inventory_message, parse_mode='Markdown')
+            inventory_message += f"🔹 {rarity_titles[rarity]}:\n"
+            for character_name, count in characters.items():
+                inventory_message += f"  • <b>{character_name}</b> ×<b>{count}</b>\n"
+            inventory_message += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+
+    # Add a motivational footer
+    inventory_message += "<i>🔥 Forge ahead, your legend awaits. Continue collecting and dominate the realms! 🔥</i>"
+
+    bot.reply_to(message, inventory_message, parse_mode='HTML')
 
 @bot.message_handler(commands=['stats'])
 def show_stats(message):
