@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from threading import Timer
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7825167784:AAHXR6jkACNm5d6O7FhGO3kDH7TyBJppX-g"
+API_TOKEN = "7825167784:AAFn6puDuKoZjJvxwfCmRyT8FATcrIwtFaE"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -46,7 +46,7 @@ def get_user_data(user_id):
             'last_bonus': None,
             'streak': 0,
             'profile': None,
-            'username': None  # Add username field
+            'username': None
         }
         users_collection.insert_one(new_user)
         return new_user
@@ -137,25 +137,75 @@ def send_welcome(message):
 """
     bot.send_message(message.chat.id, welcome_message, parse_mode="Markdown")
 
-@bot.message_handler(commands=['help'])
-def show_help(message):
-    help_message = """
-💡 **Available Commands**:
-/start - Start the bot and receive a welcome message.
-/help - Get help about the available commands.
-/ping - Check if the bot is responsive.
-/bonus - Claim your daily reward (50,000 coins every 24 hours).
-/profile - View your profile with stats and streaks.
-/inventory - View your collected characters, grouped by rarity.
-/leaderboard - Show the top users by correct guesses and their most collected character.
-/topcoins - Show the top users by total coins.
-/gift - Gift coins to another user by tagging them.
-"""
-    bot.send_message(message.chat.id, help_message)
+@bot.message_handler(commands=['profile'])
+def show_profile(message):
+    user_id = message.from_user.id
+    user = users_collection.find_one({'user_id': user_id})
+    
+    if user is None:
+        bot.reply_to(message, "You don't have a profile yet. Please interact with the bot to create one.")
+        return
 
-@bot.message_handler(commands=['ping'])
-def ping(message):
-    bot.reply_to(message, "Pong!")
+    profile_message = (
+        f"👤 **Profile**\n"
+        f"👤 Name: {user.get('profile', 'Unknown User')}\n"
+        f"💰 Coins: {user.get('coins', 0)}\n"
+        f"✅ Correct Guesses: {user.get('correct_guesses', 0)}\n"
+        f"🔥 Streak: {user.get('streak', 0)}\n"
+        f"🎒 Inventory Size: {len(user.get('inventory', []))} characters\n"
+    )
+    
+    bot.reply_to(message, profile_message, parse_mode='Markdown')
+
+@bot.message_handler(commands=['inventory'])
+def show_inventory(message):
+    user_id = message.from_user.id
+    user = users_collection.find_one({'user_id': user_id})
+
+    if user is None or not user.get('inventory'):
+        bot.reply_to(message, "Your inventory is empty. Start guessing characters to collect them!")
+        return
+
+    inventory_by_rarity = {
+        'Common': [],
+        'Rare': [],
+        'Epic': [],
+        'Legendary': []
+    }
+
+    # Group characters by rarity
+    for character in user['inventory']:
+        rarity = character.get('rarity', 'Unknown')
+        inventory_by_rarity[rarity].append(character['character_name'])
+
+    inventory_message = f"🎒 **{user.get('profile', 'Unknown User')}**'s Character Collection:\n\n"
+    
+    # Display characters by rarity
+    for rarity, characters in inventory_by_rarity.items():
+        if characters:
+            inventory_message += f"🔹 **{rarity}** ({len(characters)} characters):\n"
+            inventory_message += "\n".join([f"- {char}" for char in characters]) + "\n\n"
+    
+    bot.reply_to(message, inventory_message, parse_mode='Markdown')
+
+@bot.message_handler(commands=['stats'])
+def show_stats(message):
+    if message.from_user.id != BOT_OWNER_ID:
+        bot.reply_to(message, "❌ You are not authorized to view this information.")
+        return
+
+    total_users = users_collection.count_documents({})
+    total_coins_distributed = sum(user['coins'] for user in users_collection.find())
+    total_correct_guesses = sum(user['correct_guesses'] for user in users_collection.find())
+
+    stats_message = (
+        f"📊 **Bot Stats**:\n\n"
+        f"👥 Total Users: {total_users}\n"
+        f"💰 Total Coins Distributed: {total_coins_distributed}\n"
+        f"✅ Total Correct Guesses: {total_correct_guesses}"
+    )
+    
+    bot.reply_to(message, stats_message)
 
 @bot.message_handler(commands=['bonus'])
 def claim_bonus(message):
@@ -184,31 +234,26 @@ def gift_coins(message):
         return
 
     try:
-        # Extract the user ID from the tagged reply
         recipient_id = message.reply_to_message.from_user.id
         amount = int(message.text.split()[1])  # Expecting: /gift <amount>
     except (IndexError, ValueError):
         bot.reply_to(message, "❌ Format: /gift <amount> (tag the user)")
         return
 
-    # Ensure the sender has enough coins to gift
     if user['coins'] < amount:
         bot.reply_to(message, "❌ You don't have enough coins to gift!")
         return
 
-    # Check if the recipient exists in the database
     recipient = get_user_data(recipient_id)
     if recipient is None:
         bot.reply_to(message, "❌ Recipient not found!")
         return
 
-    # Update the sender and recipient's coins
     new_sender_coins = user['coins'] - amount
     new_recipient_coins = recipient['coins'] + amount
     update_user_data(user_id, {'coins': new_sender_coins})
     update_user_data(recipient_id, {'coins': new_recipient_coins})
 
-    # Notify both users
     bot.reply_to(message, f"🎁 You gifted {amount} coins to {message.reply_to_message.from_user.first_name}!")
     try:
         bot.send_message(recipient_id, f"🎉 You received {amount} coins from {message.from_user.first_name}!")
@@ -227,7 +272,6 @@ def show_leaderboard(message):
         inventory = user.get('inventory', [])
         most_collected_character = max({character['character_name']: inventory.count(character['character_name']) for character in inventory}, default="No characters collected")
 
-        # User link with username fallback
         if username:
             user_link = f'<a href="https://t.me/{username}"><b>{first_name}</b></a>'
         else:
@@ -248,7 +292,6 @@ def show_topcoins(message):
         username = user.get('username', None)
         inventory_count = len(user.get('inventory', []))
 
-        # User link with username fallback
         if username:
             user_link = f'<a href="https://t.me/{username}"><b>{first_name}</b></a>'
         else:
