@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from threading import Timer
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7825167784:AAFn6puDuKoZjJvxwfCmRyT8FATcrIwtFaE"
+API_TOKEN = "7579121046:AAGahqRivO-rcgred96fLRaUcsXPbpLnDqA"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
