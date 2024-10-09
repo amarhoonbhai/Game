@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7825167784:AAHodanNes-S2DLQgSajKh1X47fqe215l40"
+API_TOKEN = "7579121046:AAFaqKS0Z8GzyAR5qk47X8nP7QcJLMCBiok"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -185,26 +185,33 @@ def show_help(message):
 """
     bot.reply_to(message, help_message, parse_mode='HTML')
 
-# /inventory command with rarity-based pagination
+# /inventory command with rarity-based pagination and character multiples display (×N for duplicates)
 def paginate_inventory(user_id, page=1):
     user = get_user_data(user_id)
     inventory = user.get('inventory', [])
 
-    # Group characters by rarity
+    # Group characters by rarity and count duplicates
     rarity_groups = {
-        'Common': [],
-        'Rare': [],
-        'Epic': [],
-        'Legendary': []
+        'Common': {},
+        'Rare': {},
+        'Epic': {},
+        'Legendary': {}
     }
+
     for character in inventory:
         if isinstance(character, dict):
-            rarity_groups[character['rarity']].append(character)
+            rarity = character['rarity']
+            name = character['character_name']
+            if name in rarity_groups[rarity]:
+                rarity_groups[rarity][name] += 1
+            else:
+                rarity_groups[rarity][name] = 1
 
     # Prepare the list of all characters in order of rarity
     all_characters = []
     for rarity in ['Legendary', 'Epic', 'Rare', 'Common']:
-        all_characters.extend(rarity_groups[rarity])
+        for name, count in rarity_groups[rarity].items():
+            all_characters.append((name, rarity, count))
 
     total_items = len(all_characters)
     total_pages = (total_items + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
@@ -217,14 +224,11 @@ def paginate_inventory(user_id, page=1):
     
     # Add rarity headers and format inventory nicely
     current_rarity = None
-    for character in inventory_page:
-        if isinstance(character, dict):
-            if current_rarity != character['rarity']:  # Add header if new rarity section starts
-                current_rarity = character['rarity']
-                message += f"\n<b>🝮︎︎︎ {RARITY_LEVELS[current_rarity]} {current_rarity} 🝮︎︎︎</b>\n"
-            message += f"🝮︎︎︎ {character['character_name']}\n"
-        else:
-            message += "❌ Invalid character data found. Skipping...\n"
+    for name, rarity, count in inventory_page:
+        if current_rarity != rarity:  # Add header if new rarity section starts
+            current_rarity = rarity
+            message += f"\n<b>🝮︎︎︎ {RARITY_LEVELS[current_rarity]} {current_rarity} 🝮︎︎︎</b>\n"
+        message += f"🝮︎︎︎ {name} ×{count}\n"
 
     return message, total_pages
 
