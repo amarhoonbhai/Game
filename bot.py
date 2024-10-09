@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7579121046:AAFW6k31Q84T47gLhPCr4HeuX9nzsWdxF0E"
+API_TOKEN = "7825167784:AAHodanNes-S2DLQgSajKh1X47fqe215l40"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -41,7 +41,7 @@ RARITY_LEVELS = {
 RARITY_WEIGHTS = [60, 25, 10, 5]
 MESSAGE_THRESHOLD = 5  # Number of messages before sending a new character
 TOP_LEADERBOARD_LIMIT = 10  # Limit for leaderboard to only show top 10 users
-ITEMS_PER_PAGE = 5  # Number of characters per page in inventory
+ITEMS_PER_PAGE = 20  # Number of characters per page in inventory
 
 # Global variables to track the current character and message count
 current_character = None
@@ -135,8 +135,7 @@ def send_character(chat_id):
 def is_owner_or_sudo(user_id):
     return user_id == BOT_OWNER_ID or user_id in SUDO_USERS
 
-# Command Handlers
-
+# Welcome Command
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     user_id = message.from_user.id
@@ -147,11 +146,11 @@ def send_welcome(message):
         update_user_data(user_id, {'profile': profile_name})
 
     welcome_message = """
-<b>🝮︎︎︎︎︎︎︎ Welcome to Pʜɪʟᴏ 🝮︎︎︎︎︎︎︎ Gʀᴀʙʙᴇʀ 🝮︎︎︎︎︎︎︎</b>
+<b>🝮︎︎︎ Welcome to Pʜɪʟᴏ 🝮︎︎︎ Gᴀᴍᴇ 🝮︎︎︎</b>
 
 🎮 Ready to dive into the world of anime characters? Let’s start collecting and guessing!
 
-🝮︎︎︎︎︎︎︎ Use the commands below to explore all the features!
+🝮︎︎︎ Use the commands below to explore all the features!
 """
     markup = InlineKeyboardMarkup()
     developer_button = InlineKeyboardButton(text="Developer - @TechPiro", url="https://t.me/TechPiro")
@@ -162,140 +161,68 @@ def send_welcome(message):
 @bot.message_handler(commands=['help'])
 def show_help(message):
     help_message = """
-<b>📜 🝮︎︎︎︎︎︎︎ Available Commands 🝮︎︎︎︎︎︎︎ 📜</b>
+<b>📜 🝮︎︎︎ Available Commands 🝮︎︎︎ 📜</b>
 
 🎮 <b>Character Commands:</b>
-/bonus - Claim your daily bonus 🝮︎︎︎︎︎︎︎
-/inventory - View your character inventory 🝮︎︎︎︎︎︎︎
-/gift - Gift coins to another user by tagging them 🝮︎︎︎︎︎︎︎
-/profile - Show your personal stats (rank, coins, guesses, etc.) 🝮︎︎︎︎︎︎︎
+/bonus - Claim your daily bonus 🝮︎︎︎
+/inventory - View your character inventory 🝮︎︎︎
+/gift - Gift coins to another user by tagging them 🝮︎︎︎
+/profile - Show your personal stats (rank, coins, guesses, etc.) 🝮︎︎︎
 
 🏆 <b>Leaderboards:</b>
-/leaderboard - Show the top 10 users by coins 🝮︎︎︎︎︎︎︎
-/topcoins - Show the top 10 users by coins earned today 🝮︎︎︎︎︎︎︎
+/leaderboard - Show the top 10 users by coins 🝮︎︎︎
+/topcoins - Show the top 10 users by coins earned today 🝮︎︎︎
 
 📊 <b>Bot Stats:</b>
-/stats - Show the bot's stats (total users, characters, groups) 🝮︎︎︎︎︎︎︎
+/stats - Show the bot's stats (total users, characters, groups) 🝮︎︎︎
 
 ℹ️ <b>Miscellaneous:</b>
-/upload - Upload a new character (Sudo only) 🝮︎︎︎︎︎︎︎
-/delete - Delete a character by ID (Sudo only) 🝮︎︎︎︎︎︎︎
-/help - Show this help message 🝮︎︎︎︎︎︎︎
+/upload - Upload a new character (Sudo only) 🝮︎︎︎
+/delete - Delete a character by ID (Sudo only) 🝮︎︎︎
+/help - Show this help message 🝮︎︎︎
 
-🝮︎︎︎︎︎︎︎ Have fun and start collecting! 🝮︎︎︎︎︎︎︎
+🝮︎︎︎ Have fun and start collecting! 🝮︎︎︎
 """
     bot.reply_to(message, help_message, parse_mode='HTML')
 
-# /stats command to show bot stats
-@bot.message_handler(commands=['stats'])
-def show_stats(message):
-    if message.from_user.id != BOT_OWNER_ID:
-        bot.reply_to(message, "❌ You are not authorized to view this information.")
-        return
-
-    total_users = users_collection.count_documents({})
-    total_characters = characters_collection.count_documents({})
-    total_groups = groups_collection.count_documents({})
-
-    stats_message = f"""
-<b>📊 🝮︎︎︎︎︎︎︎ Bot Stats 🝮︎︎︎︎︎︎︎:</b>
-- 🧑‍🤝‍🧑 Total Users: {total_users}
-- 🎎 Total Characters: {total_characters}
-- 👥 Total Groups: {total_groups}
-"""
-    bot.reply_to(message, stats_message, parse_mode='HTML')
-
-# /leaderboard command to show top users by coins
-@bot.message_handler(commands=['leaderboard'])
-def show_leaderboard(message):
-    users = users_collection.find().sort('coins', -1).limit(TOP_LEADERBOARD_LIMIT)
-
-    if users.count() == 0:
-        bot.reply_to(message, "No users found in the leaderboard.")
-    else:
-        leaderboard_message = "🏆 **Top 10 Leaderboard**:\n\n"
-        for rank, user in enumerate(users, start=1):
-            profile_name = user.get('profile', 'Unknown User')  # Display profile or "Unknown User"
-            leaderboard_message += f"{rank}. {profile_name} - {user['coins']} coins\n"
-
-        bot.send_message(message.chat.id, leaderboard_message)
-
-# /upload command for sudo users to add new characters
-@bot.message_handler(commands=['upload'])
-def upload_character(message):
-    if not is_owner_or_sudo(message.from_user.id):
-        bot.reply_to(message, "❌ You are not authorized to upload characters.")
-        return
-
-    # Parse command text for image URL and character name
-    try:
-        _, image_url, character_name = message.text.split(maxsplit=2)
-    except ValueError:
-        bot.reply_to(message, "❌ Invalid format. Use `/upload <image_url> <character_name>`")
-        return
-
-    # Assign a random rarity
-    rarity = assign_rarity()
-
-    # Add character to the database
-    character = add_character(image_url, character_name, rarity)
-    bot.reply_to(message, f"✅ Character '{character_name}' uploaded successfully with rarity {RARITY_LEVELS[rarity]}!")
-    bot.send_message(CHANNEL_ID, f"New character uploaded: {character_name} (ID: {character['id']}, {RARITY_LEVELS[rarity]} {rarity})")
-
-# /delete command for sudo users to remove a character by ID
-@bot.message_handler(commands=['delete'])
-def delete_character_command(message):
-    if not is_owner_or_sudo(message.from_user.id):
-        bot.reply_to(message, "❌ You are not authorized to delete characters.")
-        return
-
-    try:
-        _, character_id_str = message.text.split(maxsplit=1)
-        character_id = int(character_id_str)
-    except (ValueError, IndexError):
-        bot.reply_to(message, "❌ Invalid format. Use `/delete <character_id>`.")
-        return
-
-    result = delete_character(character_id)
-
-    if result.deleted_count > 0:
-        bot.reply_to(message, f"✅ Character with ID {character_id} has been successfully deleted.")
-    else:
-        bot.reply_to(message, f"❌ Character with ID {character_id} not found.")
-
-# /bonus command to claim daily bonus
-@bot.message_handler(commands=['bonus'])
-def claim_bonus(message):
-    user_id = message.from_user.id
-    user = get_user_data(user_id)
-    now = datetime.now()
-
-    if user['last_bonus'] and now - datetime.fromisoformat(user['last_bonus']) < BONUS_INTERVAL:
-        next_claim = datetime.fromisoformat(user['last_bonus']) + BONUS_INTERVAL
-        remaining_time = next_claim - now
-        hours_left = remaining_time.seconds // 3600
-        minutes_left = (remaining_time.seconds % 3600) // 60
-        bot.reply_to(message, f"⏳ You can claim your next bonus in {hours_left} hours and {minutes_left} minutes.")
-    else:
-        new_coins = user['coins'] + BONUS_COINS
-        update_user_data(user_id, {'coins': new_coins, 'last_bonus': now.isoformat()})
-        bot.reply_to(message, f"🎉 You have received {BONUS_COINS} coins! 🪙")
-
-# Pagination for /inventory command
+# /inventory command with rarity-based pagination
 def paginate_inventory(user_id, page=1):
     user = get_user_data(user_id)
     inventory = user.get('inventory', [])
-    total_items = len(inventory)
+
+    # Group characters by rarity
+    rarity_groups = {
+        'Common': [],
+        'Rare': [],
+        'Epic': [],
+        'Legendary': []
+    }
+    for character in inventory:
+        if isinstance(character, dict):
+            rarity_groups[character['rarity']].append(character)
+
+    # Prepare the list of all characters in order of rarity
+    all_characters = []
+    for rarity in ['Legendary', 'Epic', 'Rare', 'Common']:
+        all_characters.extend(rarity_groups[rarity])
+
+    total_items = len(all_characters)
     total_pages = (total_items + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
 
     start = (page - 1) * ITEMS_PER_PAGE
     end = start + ITEMS_PER_PAGE
-    inventory_page = inventory[start:end]
+    inventory_page = all_characters[start:end]
 
-    message = f"🎒 **Your Character Inventory (Page {page}/{total_pages}):**\n"
+    message = f"🎒 **Your Character Inventory (Page {page}/{total_pages}) 🝮︎︎︎:**\n"
+    
+    # Add rarity headers and format inventory nicely
+    current_rarity = None
     for character in inventory_page:
         if isinstance(character, dict):
-            message += f"🔹 {RARITY_LEVELS[character['rarity']]} {character['rarity']} - {character['character_name']}\n"
+            if current_rarity != character['rarity']:  # Add header if new rarity section starts
+                current_rarity = character['rarity']
+                message += f"\n<b>🝮︎︎︎ {RARITY_LEVELS[current_rarity]} {current_rarity} 🝮︎︎︎</b>\n"
+            message += f"🝮︎︎︎ {character['character_name']}\n"
         else:
             message += "❌ Invalid character data found. Skipping...\n"
 
@@ -309,9 +236,9 @@ def show_inventory(message):
 
     markup = InlineKeyboardMarkup()
     if total_pages > 1:
-        markup.add(InlineKeyboardButton('Next', callback_data=f'inventory_{page+1}'))
+        markup.add(InlineKeyboardButton('Next 🝮︎︎︎', callback_data=f'inventory_{page+1}'))
 
-    bot.send_message(message.chat.id, inventory_message, parse_mode='Markdown', reply_markup=markup)
+    bot.send_message(message.chat.id, inventory_message, parse_mode='HTML', reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('inventory_'))
 def paginate_inventory_callback(call):
@@ -322,11 +249,11 @@ def paginate_inventory_callback(call):
 
     markup = InlineKeyboardMarkup()
     if page > 1:
-        markup.add(InlineKeyboardButton('Previous', callback_data=f'inventory_{page-1}'))
+        markup.add(InlineKeyboardButton('Previous 🝮︎︎︎', callback_data=f'inventory_{page-1}'))
     if page < total_pages:
-        markup.add(InlineKeyboardButton('Next', callback_data=f'inventory_{page+1}'))
+        markup.add(InlineKeyboardButton('Next 🝮︎︎︎', callback_data=f'inventory_{page+1}'))
 
-    bot.edit_message_text(inventory_message, call.message.chat.id, call.message.message_id, parse_mode='Markdown', reply_markup=markup)
+    bot.edit_message_text(inventory_message, call.message.chat.id, call.message.message_id, parse_mode='HTML', reply_markup=markup)
 
 # Handle all types of messages and increment the message counter
 @bot.message_handler(func=lambda message: True)
@@ -365,16 +292,11 @@ def handle_all_messages(message):
                 'inventory': user['inventory'] + [current_character]
             })
 
-            bot.reply_to(message, f"🎉 Congratulations! You guessed correctly and earned {COINS_PER_GUESS} coins! 🝮︎︎︎︎︎︎︎\n"
-                                  f"🔥 Streak Bonus: {streak_bonus} coins for a {user['streak']}-guess streak! 🝮︎︎︎︎︎︎︎")
+            bot.reply_to(message, f"🎉 Congratulations! You guessed correctly and earned {COINS_PER_GUESS} coins! 🝮︎︎︎\n"
+                                  f"🔥 Streak Bonus: {streak_bonus} coins for a {user['streak']}-guess streak! 🝮︎︎︎")
             
             # Send a new character immediately after a correct guess
             send_character(chat_id)
-
-        else:
-            # Reset the streak if the guess is incorrect
-            update_user_data(user_id, {'streak': 0})
-            bot.reply_to(message, "❌ Wrong guess! Try again!")
 
 # Start polling the bot
 bot.infinity_polling(timeout=60, long_polling_timeout=60)
