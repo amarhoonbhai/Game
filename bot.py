@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7579121046:AAE66WWKd8EcZohuXR7qBOSpbAssd8Tfydc"
+API_TOKEN = "7579121046:AAHXqY_W6nwzgxwAnVL4Fp0JCFmw0_kTZRI"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -16,7 +16,7 @@ try:
     db = client['philo_grabber']  # Database name
     users_collection = db['users']  # Collection for user data
     characters_collection = db['characters']  # Collection for character data
-    groups_collection = db['groups']  # Collection for group stats (for /stats)
+    groups_collection = db['groups']  # Collection for group stats (for /stats and /topgroups)
     print("🝮︎︎︎ Connected to MongoDB 🝮︎︎︎")
 except errors.ServerSelectionTimeoutError as err:
     print(f"Error: Could not connect to MongoDB: {err}")
@@ -115,7 +115,7 @@ def fetch_new_character():
     return None
 
 # Track Group Activity
-def track_group_activity(chat_id):
+def track_group_activity(chat_id, chat_name):
     group = groups_collection.find_one({'group_id': chat_id})
     if group:
         groups_collection.update_one({'group_id': chat_id}, {'$inc': {'message_count': 1}})
@@ -123,7 +123,7 @@ def track_group_activity(chat_id):
         groups_collection.insert_one({
             'group_id': chat_id,
             'message_count': 1,
-            'group_name': 'Unknown'
+            'group_name': chat_name
         })
 
 # Sending a character to chat
@@ -245,7 +245,7 @@ def show_top_coins(message):
 
     bot.reply_to(message, leaderboard_message, parse_mode='HTML')
 
-# /topgroups Command - Top 10 most active groups by messages
+# /topgroups Command - Top 10 most active groups by messages (use group names)
 @bot.message_handler(commands=['topgroups'])
 def show_top_groups(message):
     top_groups = list(groups_collection.find().sort("message_count", -1).limit(TOP_LEADERBOARD_LIMIT))
@@ -256,7 +256,7 @@ def show_top_groups(message):
 
     leaderboard_message = "<b>🏆 Top 10 Most Active Groups by Messages 🝮︎︎︎</b>\n\n"
     for i, group in enumerate(top_groups):
-        group_name = group.get('group_name', 'Unknown')
+        group_name = group.get('group_name', 'Unnamed Group')
         message_count = group.get('message_count', 0)
         leaderboard_message += f"{i+1}. {group_name}: {message_count} messages\n"
 
@@ -266,7 +266,8 @@ def show_top_groups(message):
 @bot.message_handler(func=lambda message: message.chat.type in ['group', 'supergroup'])
 def handle_group_message(message):
     chat_id = message.chat.id
-    track_group_activity(chat_id)
+    chat_name = message.chat.title if message.chat.title else 'Unnamed Group'
+    track_group_activity(chat_id, chat_name)
 
     # Call the original message handler (if necessary)
     handle_all_messages(message)
@@ -309,6 +310,217 @@ def handle_all_messages(message):
                                   f"🔥 Streak Bonus: {streak_bonus} coins for a {user['streak']}-guess streak! 🝮︎︎︎")
             
             send_character(chat_id)
+
+# Handle /leaderboard Command - Show top 10 users by total coins
+@bot.message_handler(commands=['leaderboard'])
+def show_leaderboard(message):
+    top_users = list(users_collection.find().sort("coins", -1).limit(TOP_LEADERBOARD_LIMIT))
+    
+    if not top_users:
+        bot.reply_to(message, "No users found in the leaderboard.")
+        return
+
+    leaderboard_message = "<b>🏆 Top 10 Users 🝮︎︎︎</b>\n\n"
+    for i, user in enumerate(top_users):
+        username = user.get('profile', 'Unknown')
+        coins = user['coins']
+        leaderboard_message += f"{i+1}. {username}: {coins} coins\n"
+
+    bot.reply_to(message, leaderboard_message, parse_mode='HTML')
+
+# /inventory Command with pagination and rarity-based character grouping
+def paginate_inventory(user_id, page=1):
+    user = get_user_data(user_id)
+    inventory = user.get('inventory', [])
+
+    rarity_groups = {
+        'Common': {},
+        'Rare': {},
+        'Epic': {},
+        'Legendary': {}
+    }
+
+    for character in inventory:
+        if isinstance(character, dict):
+            rarity = character['rarity']
+            name = character['character_name']
+            if name in rarity_groups[rarity]:
+                rarity_groups[rarity][name] += 1
+            else:
+                rarity_groups[rarity][name] = 1
+
+    all_characters = []
+    for rarity in ['Legendary', 'Epic', 'Rare', 'Common']:
+        for name, count in rarity_groups[rarity].items():
+            all_characters.append((name, rarity, count))
+
+    total_items = len(all_characters)
+    total_pages = (total_items + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+
+    start = (page - 1) * ITEMS_PER_PAGE
+    end = start + ITEMS_PER_PAGE
+    inventory_page = all_characters[start:end]
+
+    message = f"🎒 **Your Character Inventory (Page {page}/{total_pages}) 🝮︎︎︎:**\n"
+    
+    current_rarity = None
+    for name, rarity, count in inventory_page:
+        if current_rarity != rarity:
+            current_rarity = rarity
+            message += f"\n<b>🝮︎︎︎ {RARITY_LEVELS[current_rarity]} {current_rarity} 🝮︎︎︎</b>\n"
+        message += f"🝮︎︎︎ {name} ×{count}\n"
+
+    return message, total_pages
+
+@bot.message_handler(commands=['inventory'])
+def show_inventory(message):
+    user_id = message.from_user.id
+    page = 1
+    inventory_message, total_pages = paginate_inventory(user_id, page)
+
+    markup = InlineKeyboardMarkup()
+    if total_pages > 1:
+        markup.add(InlineKeyboardButton('Next 🝮︎︎︎', callback_data=f'inventory_{page+1}'))
+
+    bot.send_message(message.chat.id, inventory_message, parse_mode='HTML', reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('inventory_'))
+def paginate_inventory_callback(call):
+    user_id = call.from_user.id
+    page = int(call.data.split('_')[1])
+
+    inventory_message, total_pages = paginate_inventory(user_id, page)
+
+    markup = InlineKeyboardMarkup()
+    if page > 1:
+        markup.add(InlineKeyboardButton('Previous 🝮︎︎︎', callback_data=f'inventory_{page-1}'))
+    if page < total_pages:
+        markup.add(InlineKeyboardButton('Next 🝮︎︎︎', callback_data=f'inventory_{page+1}'))
+
+    bot.edit_message_text(inventory_message, call.message.chat.id, call.message.message_id, parse_mode='HTML', reply_markup=markup)
+
+# /profile Command
+@bot.message_handler(commands=['profile'])
+def show_profile(message):
+    user_id = message.from_user.id
+    user = get_user_data(user_id)
+    
+    # Fetch user's rank
+    rank, total_users, coins_to_next_rank = get_user_rank(user_id)
+    
+    # User information
+    profile_name = user.get('profile', 'Unknown')
+    coins = user.get('coins', 0)
+    correct_guesses = user.get('correct_guesses', 0)
+    streak = user.get('streak', 0)
+    
+    profile_message = (
+        f"<b>🝮︎︎︎ {profile_name}'s Profile 🝮︎︎︎</b>\n"
+        f"🏅 Rank: {rank}/{total_users}\n"
+        f"💰 Coins: {coins}\n"
+        f"🎯 Correct Guesses: {correct_guesses}\n"
+        f"🔥 Streak: {streak}\n"
+    )
+
+    if coins_to_next_rank:
+        profile_message += f"Next rank in {coins_to_next_rank} coins.\n"
+
+    bot.reply_to(message, profile_message, parse_mode='HTML')
+
+# /gift Command - Gift coins to another user
+@bot.message_handler(commands=['gift'])
+def gift_coins(message):
+    if not message.reply_to_message:
+        bot.reply_to(message, "❌ You must reply to a user's message to gift coins.")
+        return
+    
+    user_id = message.from_user.id
+    target_user_id = message.reply_to_message.from_user.id
+    user = get_user_data(user_id)
+    target_user = get_user_data(target_user_id)
+
+    try:
+        # Extract the amount of coins from the message
+        amount = int(message.text.split()[1])
+        
+        if amount <= 0:
+            bot.reply_to(message, "❌ You can only gift a positive amount of coins.")
+            return
+
+        if user['coins'] < amount:
+            bot.reply_to(message, "❌ You don't have enough coins to gift.")
+            return
+
+        # Update both users' data
+        update_user_data(user_id, {'coins': user['coins'] - amount})
+        update_user_data(target_user_id, {'coins': target_user['coins'] + amount})
+
+        bot.reply_to(message, f"🎁 You successfully gifted {amount} coins to {message.reply_to_message.from_user.full_name}!")
+    except (IndexError, ValueError):
+        bot.reply_to(message, "❌ Please provide a valid amount of coins to gift.")
+
+# /upload Command - Sudo only command to add a new character
+@bot.message_handler(commands=['upload'])
+def upload_character(message):
+    user_id = message.from_user.id
+    if not is_owner_or_sudo(user_id):
+        bot.reply_to(message, "❌ You do not have permission to use this command.")
+        return
+    
+    bot.send_message(message.chat.id, "Please send the character name, image URL, and rarity separated by commas (e.g., 'Character Name, https://image.url, Epic')")
+
+    @bot.message_handler(func=lambda m: True)
+    def handle_upload(message):
+        try:
+            # Extract the character details
+            character_data = message.text.split(',')
+            character_name = character_data[0].strip()
+            image_url = character_data[1].strip()
+            rarity = character_data[2].strip()
+            
+            if rarity not in RARITY_LEVELS:
+                bot.reply_to(message, "❌ Invalid rarity. Use one of the following: Common, Rare, Epic, Legendary.")
+                return
+
+            # Insert into the MongoDB collection
+            new_character = add_character(image_url, character_name, rarity)
+            
+            bot.reply_to(message, f"✅ Character '{character_name}' added successfully!")
+        except Exception as e:
+            bot.reply_to(message, f"❌ Error adding character: {e}")
+
+# /delete Command - Sudo only command to delete a character
+@bot.message_handler(commands=['delete'])
+def delete_character_command(message):
+    user_id = message.from_user.id
+    if not is_owner_or_sudo(user_id):
+        bot.reply_to(message, "❌ You do not have permission to use this command.")
+        return
+    
+    try:
+        character_id = int(message.text.split()[1])
+        result = delete_character(character_id)
+        if result.deleted_count > 0:
+            bot.reply_to(message, f"✅ Character with ID {character_id} has been deleted.")
+        else:
+            bot.reply_to(message, f"❌ No character found with ID {character_id}.")
+    except (IndexError, ValueError):
+        bot.reply_to(message, "❌ Please provide a valid character ID to delete.")
+
+# /stats Command - Shows global statistics about the bot
+@bot.message_handler(commands=['stats'])
+def show_stats(message):
+    total_users = users_collection.count_documents({})
+    total_characters = characters_collection.count_documents({})
+    total_groups = groups_collection.count_documents({})
+
+    stats_message = (
+        f"📊 <b>Bot Stats 🝮︎︎︎</b>\n\n"
+        f"👥 Total Users: {total_users}\n"
+        f"🎨 Total Characters: {total_characters}\n"
+        f"🏠 Total Groups: {total_groups}\n"
+    )
+    bot.reply_to(message, stats_message, parse_mode='HTML')
 
 # Start polling the bot
 bot.infinity_polling(timeout=60, long_polling_timeout=60)
