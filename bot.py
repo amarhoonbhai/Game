@@ -3,9 +3,11 @@ import random
 from pymongo import MongoClient, errors
 from datetime import datetime, timedelta
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+import time
+from threading import Thread
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7579121046:AAFlFhjpuNiyQ-sEVDUKCYVc0x4leNfwCFY"
+API_TOKEN = "7579121046:AAGr-NtYLYT1Nd2JxgYUr5tdRZSvGr6wQ6g"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -74,145 +76,90 @@ def update_user_data(user_id, update_data):
     except Exception as e:
         print(f"Error in update_user_data: {e}")
 
-def get_user_rank(user_id):
-    try:
-        user = get_user_data(user_id)
-        if user is None:
-            return None, None, None
-        
-        user_coins = user['coins']
-        higher_ranked_users = users_collection.count_documents({'coins': {'$gt': user_coins}})
-        total_users = users_collection.count_documents({})
-
-        rank = higher_ranked_users + 1
-        next_user = users_collection.find_one({'coins': {'$gt': user_coins}}, sort=[('coins', 1)])
-        coins_to_next_rank = next_user['coins'] - user_coins if next_user else None
-
-        return rank, total_users, coins_to_next_rank
-    except Exception as e:
-        print(f"Error in get_user_rank: {e}")
-        return None, None, None
-
-def fetch_new_character():
-    try:
-        characters = list(characters_collection.find())
-        return random.choice(characters) if characters else None
-    except Exception as e:
-        print(f"Error in fetch_new_character: {e}")
-        return None
-
-def add_character(image_url, character_name, rarity):
-    try:
-        character_id = characters_collection.count_documents({}) + 1
-        character = {
-            'id': character_id,
-            'image_url': image_url,
-            'character_name': character_name,
-            'rarity': rarity
-        }
-        characters_collection.insert_one(character)
-        return character
-    except Exception as e:
-        print(f"Error in add_character: {e}")
-        return None
-
-def delete_character(character_id):
-    try:
-        return characters_collection.delete_one({'id': character_id})
-    except Exception as e:
-        print(f"Error in delete_character: {e}")
-        return None
-
-def assign_rarity():
-    return random.choices(list(RARITY_LEVELS.keys()), weights=RARITY_WEIGHTS, k=1)[0]
-
 # Command Handlers
 
-# Welcome Command
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
+# Leaderboard Command
+@bot.message_handler(commands=['leaderboard'])
+def show_leaderboard(message):
     try:
-        user_id = message.from_user.id
-        user = get_user_data(user_id)
-        if not user['profile']:
-            profile_name = message.from_user.full_name
-            update_user_data(user_id, {'profile': profile_name})
+        top_users = users_collection.find().sort('coins', -1).limit(TOP_LEADERBOARD_LIMIT)
+        leaderboard_message = "<b>🏆 Top Players Leaderboard 🏆</b>\n\n"
+        for rank, user in enumerate(top_users, start=1):
+            profile_name = user.get('profile', 'Unknown User')
+            coins = user.get('coins', 0)
+            leaderboard_message += f"{rank}. {profile_name} - {coins} coins\n"
+        bot.reply_to(message, leaderboard_message, parse_mode='HTML')
+    except Exception as e:
+        print(f"Error in show_leaderboard: {e}")
+        bot.reply_to(message, "⚠️ An error occurred while fetching the leaderboard.")
 
-        welcome_message = """
-<b>🝮︎︎︎ Welcome to Pʜɪʟᴏ 🝮︎︎︎ Gᴀᴍᴇ 🝮︎︎︎</b>
+# Top Groups Command
+@bot.message_handler(commands=['topgroups'])
+def show_top_groups(message):
+    try:
+        top_groups = groups_collection.find().sort('message_count', -1).limit(TOP_LEADERBOARD_LIMIT)
+        top_groups_message = "<b>🏆 Top Groups 🏆</b>\n\n"
+        for rank, group in enumerate(top_groups, start=1):
+            group_name = group.get('group_name', 'Unknown Group')
+            message_count = group.get('message_count', 0)
+            top_groups_message += f"{rank}. {group_name} - {message_count} messages\n"
+        bot.reply_to(message, top_groups_message, parse_mode='HTML')
+    except Exception as e:
+        print(f"Error in show_top_groups: {e}")
+        bot.reply_to(message, "⚠️ An error occurred while fetching the top groups.")
 
-🎮 Ready to dive into the world of anime characters? Let’s start collecting and guessing!
+# Stats Command (Owner Only)
+@bot.message_handler(commands=['stats'])
+def show_stats(message):
+    try:
+        if message.from_user.id != BOT_OWNER_ID:
+            bot.reply_to(message, "❌ You are not authorized to use this command.")
+            return
 
-🝮︎︎︎ Use the commands below to explore all the features!
+        total_users = users_collection.count_documents({})
+        total_characters = characters_collection.count_documents({})
+        total_groups = groups_collection.count_documents({})
+
+        stats_message = f"""
+<b>🝮︎︎︎ Bot Stats 🝮︎︎︎</b>
+👥 Total Users: {total_users}
+🎭 Total Characters: {total_characters}
+💬 Total Groups: {total_groups}
 """
-        markup = InlineKeyboardMarkup()
-        developer_button = InlineKeyboardButton(text="Developer - @TechPiro", url="https://t.me/TechPiro")
-        markup.add(developer_button)
-
-        bot.send_message(message.chat.id, welcome_message, parse_mode='HTML', reply_markup=markup)
+        bot.reply_to(message, stats_message, parse_mode='HTML')
     except Exception as e:
-        print(f"Error in send_welcome: {e}")
+        print(f"Error in show_stats: {e}")
+        bot.reply_to(message, "⚠️ An error occurred while fetching the bot stats.")
 
-# Help Command
-@bot.message_handler(commands=['help'])
-def show_help(message):
+# Delete a Character by ID (Sudo Only)
+@bot.message_handler(commands=['delete'])
+def delete_character_command(message):
     try:
-        help_message = """
-<b>📜 🝮︎︎︎ Available Commands 🝮︎︎︎ 📜</b>
+        if message.from_user.id not in SUDO_USERS:
+            bot.reply_to(message, "❌ You are not authorized to use this command.")
+            return
 
-🎮 <b>Character Commands:</b>
-/bonus - Claim your daily bonus 🝮︎︎︎
-/inventory - View your character inventory 🝮︎︎︎
-/gift - Gift coins to another user by tagging them 🝮︎︎︎
-/profile - Show your personal stats (rank, coins, guesses, etc.) 🝮︎︎︎
+        msg_parts = message.text.split()
+        if len(msg_parts) < 2:
+            bot.reply_to(message, "❌ Invalid format. Use /delete <character_id>")
+            return
 
-🏆 <b>Leaderboards:</b>
-/leaderboard - Show the top 10 users by coins 🝮︎︎︎
-/topcoins - Show the top 10 users by coins earned today 🝮︎︎︎
-/topgroups - Show the top 10 most active groups by messages 🝮︎︎︎
+        try:
+            character_id = int(msg_parts[1])
+        except ValueError:
+            bot.reply_to(message, "❌ Invalid character ID. Please provide a numeric ID.")
+            return
 
-📊 <b>Bot Stats:</b>
-/stats - Show the bot's stats (total users, characters, groups) 🝮︎︎︎
-
-ℹ️ <b>Miscellaneous:</b>
-/upload - Upload a new character (Sudo only) 🝮︎︎︎
-/delete - Delete a character by ID (Sudo only) 🝮︎︎︎
-/help - Show this help message 🝮︎︎︎
-
-🝮︎︎︎ Have fun and start collecting! 🝮︎︎︎
-"""
-        bot.reply_to(message, help_message, parse_mode='HTML')
-    except Exception as e:
-        print(f"Error in show_help: {e}")
-
-# Bonus Command
-@bot.message_handler(commands=['bonus'])
-def claim_bonus(message):
-    try:
-        user_id = message.from_user.id
-        user = get_user_data(user_id)
-        last_bonus_time = user.get('last_bonus')
-
-        if last_bonus_time:
-            last_bonus = datetime.strptime(last_bonus_time, '%Y-%m-%d %H:%M:%S.%f')
+        result = delete_character(character_id)
+        if result.deleted_count > 0:
+            bot.reply_to(message, f"🗑 Character with ID {character_id} deleted.")
         else:
-            last_bonus = None
-
-        now = datetime.utcnow()
-
-        if last_bonus and now - last_bonus < BONUS_INTERVAL:
-            remaining_time = BONUS_INTERVAL - (now - last_bonus)
-            hours, remainder = divmod(remaining_time.seconds, 3600)
-            minutes, _ = divmod(remainder, 60)
-            bot.reply_to(message, f"🕑 You have already claimed your bonus. Please try again in {hours} hours and {minutes} minutes.")
-        else:
-            new_coins = user['coins'] + BONUS_COINS
-            update_user_data(user_id, {'coins': new_coins, 'last_bonus': now.strftime('%Y-%m-%d %H:%M:%S.%f')})
-            bot.reply_to(message, f"🎁 You claimed your daily bonus of {BONUS_COINS} coins! 🝮︎︎︎")
+            bot.reply_to(message, f"❌ Character with ID {character_id} not found.")
     except Exception as e:
-        print(f"Error in claim_bonus: {e}")
+        print(f"Error in delete_character_command: {e}")
+        bot.reply_to(message, "⚠️ An error occurred while deleting the character.")
 
-# Add the remaining handlers here and ensure they follow the same structure.
+# Add additional helper functions, command handlers as necessary...
 
 # Start polling the bot
 try:
