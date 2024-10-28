@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # Replace with your actual bot API token and Telegram channel ID
-API_TOKEN = "7579121046:AAHRX9CbOLma9OE0y8Mfu6EiZhGjZ_3W3Ms"
+API_TOKEN = "6862816736:AAHZon3C99Kv1rdfcFYh9zx8OabRYT3WoQA"
 BOT_OWNER_ID = 7222795580  # Replace with the owner’s Telegram ID
 CHANNEL_ID = -1002438449944  # Replace with your Telegram channel ID where characters are logged
 
@@ -41,7 +41,6 @@ RARITY_LEVELS = {
 RARITY_WEIGHTS = [60, 25, 10, 5]
 MESSAGE_THRESHOLD = 5  # Number of messages before sending a new character
 TOP_LEADERBOARD_LIMIT = 10  # Limit for leaderboard to only show top 10 users
-ITEMS_PER_PAGE = 20  # Number of characters per page in inventory
 
 # Global variables to track the current character and message count
 current_character = None
@@ -55,7 +54,6 @@ def get_user_data(user_id):
             'user_id': user_id,
             'coins': 0,
             'correct_guesses': 0,
-            'inventory': [],
             'last_bonus': None,
             'streak': 0,
             'profile': None
@@ -148,6 +146,16 @@ def show_bot_stats(message):
                           f"🝮︎︎︎ Total Characters: {total_characters}\n"
                           f"🝮︎︎︎ Total Groups: {total_groups}", parse_mode='HTML')
 
+# Topcoins Command Handler
+@bot.message_handler(commands=['topcoins'])
+def show_topcoins(message):
+    top_users = users_collection.find().sort('coins', -1).limit(TOP_LEADERBOARD_LIMIT)
+    top_message = "<b>🏆 Top 10 Users by Coins 🝮︎︎︎</b>\n\n"
+    for rank, user in enumerate(top_users, start=1):
+        top_message += f"{rank}. {user.get('profile', 'Anonymous')} - {user['coins']} coins 🝮︎︎︎\n"
+
+    bot.reply_to(message, top_message, parse_mode='HTML')
+
 # Sending a character to chat
 def send_character(chat_id):
     global current_character
@@ -195,12 +203,6 @@ def show_help(message):
 
 🎮 <b>Character Commands:</b>
 /bonus - Claim your daily bonus 🝮︎︎︎
-/inventory - View your character inventory 🝮︎︎︎
-/gift - Gift coins to another user by tagging them 🝮︎︎︎
-/profile - Show your personal stats (rank, coins, guesses, etc.) 🝮︎︎︎
-
-🏆 <b>Leaderboards:</b>
-/leaderboard - Show the top 10 users by coins 🝮︎︎︎
 /topcoins - Show the top 10 users by coins earned today 🝮︎︎︎
 
 📊 <b>Bot Stats:</b>
@@ -214,77 +216,6 @@ def show_help(message):
 🝮︎︎︎ Have fun and start collecting! 🝮︎︎︎
 """
     bot.reply_to(message, help_message, parse_mode='HTML')
-
-# Inventory Pagination
-def paginate_inventory(user_id, page=1):
-    user = get_user_data(user_id)
-    inventory = user.get('inventory', [])
-
-    rarity_groups = {
-        'Common': {},
-        'Rare': {},
-        'Epic': {},
-        'Legendary': {}
-    }
-
-    for character in inventory:
-        if isinstance(character, dict):
-            rarity = character['rarity']
-            name = character['character_name']
-            if name in rarity_groups[rarity]:
-                rarity_groups[rarity][name] += 1
-            else:
-                rarity_groups[rarity][name] = 1
-
-    all_characters = []
-    for rarity in ['Legendary', 'Epic', 'Rare', 'Common']:
-        for name, count in rarity_groups[rarity].items():
-            all_characters.append((name, rarity, count))
-
-    total_items = len(all_characters)
-    total_pages = (total_items + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
-
-    start = (page - 1) * ITEMS_PER_PAGE
-    end = start + ITEMS_PER_PAGE
-    inventory_page = all_characters[start:end]
-
-    message = f"🎒 **Your Character Inventory (Page {page}/{total_pages}) 🝮︎︎︎:**\n"
-    
-    current_rarity = None
-    for name, rarity, count in inventory_page:
-        if current_rarity != rarity:
-            current_rarity = rarity
-            message += f"\n<b>🝮︎︎︎ {RARITY_LEVELS[current_rarity]} {current_rarity} 🝮︎︎︎</b>\n"
-        message += f"🝮︎︎︎ {name} ×{count}\n"
-
-    return message, total_pages
-
-@bot.message_handler(commands=['inventory'])
-def show_inventory(message):
-    user_id = message.from_user.id
-    page = 1
-    inventory_message, total_pages = paginate_inventory(user_id, page)
-
-    markup = InlineKeyboardMarkup()
-    if total_pages > 1:
-        markup.add(InlineKeyboardButton('Next 🝮︎︎︎', callback_data=f'inventory_{page+1}'))
-
-    bot.send_message(message.chat.id, inventory_message, parse_mode='HTML', reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('inventory_'))
-def paginate_inventory_callback(call):
-    user_id = call.from_user.id
-    page = int(call.data.split('_')[1])
-
-    inventory_message, total_pages = paginate_inventory(user_id, page)
-
-    markup = InlineKeyboardMarkup()
-    if page > 1:
-        markup.add(InlineKeyboardButton('Previous 🝮︎︎︎', callback_data=f'inventory_{page-1}'))
-    if page < total_pages:
-        markup.add(InlineKeyboardButton('Next 🝮︎︎︎', callback_data=f'inventory_{page+1}'))
-
-    bot.edit_message_text(inventory_message, call.message.chat.id, call.message.message_id, parse_mode='HTML', reply_markup=markup)
 
 # Handle all types of messages and increment the message counter
 @bot.message_handler(func=lambda message: True)
@@ -315,8 +246,7 @@ def handle_all_messages(message):
             update_user_data(user_id, {
                 'coins': new_coins + streak_bonus,
                 'correct_guesses': user['correct_guesses'],
-                'streak': user['streak'],
-                'inventory': user['inventory'] + [current_character]
+                'streak': user['streak']
             })
 
             bot.reply_to(message, f"🎉 Congratulations! You guessed correctly and earned {COINS_PER_GUESS} coins! 🝮︎︎︎\n"
