@@ -3,7 +3,7 @@
 from datetime import timedelta
 
 # Bot API token (replace with your actual token)
-API_TOKEN = "6862816736:AAGIUDqRfylWq9y1bIJ9WtRH_jZDmquoie8"
+API_TOKEN = "6862816736:AAFwW3ZpKYvUL6hVl22tpklPtvtgDR7dXrw"
 
 # MongoDB connection URI
 MONGO_URI = "mongodb+srv://PhiloWise:Philo@waifu.yl9tohm.mongodb.net/?retryWrites=true&w=majority&appName=Waifu"
