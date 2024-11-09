@@ -18,15 +18,20 @@ CHARACTERS_COLLECTION = "characters"
 USERS_COLLECTION = "users"
 
 # Bot token and access control
-TOKEN = "6862816736:AAEsACgCBaMHWPq8rKxH5rLcc-NVDNZDXm4"
+TOKEN = "6862816736:AAGOF3fMlGQ0p1O2r-j4Dk-3eiVAhB88DFQ"
 OWNER_ID = 7222795580
 ADMIN_IDS = [OWNER_ID, 987654321]
 
-# MongoDB setup
-client = MongoClient(MONGO_URI)
-db = client[DATABASE_NAME]
-characters_collection = db[CHARACTERS_COLLECTION]
-users_collection = db[USERS_COLLECTION]
+# MongoDB setup with connection confirmation for console logging only
+try:
+    client = MongoClient(MONGO_URI)
+    db = client[DATABASE_NAME]
+    characters_collection = db[CHARACTERS_COLLECTION]
+    users_collection = db[USERS_COLLECTION]
+    logger.info("✅ MongoDB connected successfully.")
+except Exception as e:
+    logger.error(f"❌ MongoDB connection failed: {e}")
+    raise SystemExit("Failed to connect to MongoDB. Exiting the bot.")
 
 # Rarity mapping with emojis
 RARITY_EMOJIS = {
@@ -36,6 +41,7 @@ RARITY_EMOJIS = {
     "platinum": "💿",
     "diamond": "💎"
 }
+RARITY_CHOICES = list(RARITY_EMOJIS.keys())
 
 # Game state variables
 current_character = None
@@ -56,14 +62,8 @@ def safe_send_message(update, text, parse_mode=None, reply_markup=None):
     try:
         if update.message and update.message.chat_id:
             update.message.reply_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
-    except BadRequest as e:
-        logger.warning(f"BadRequest: {e}. Could not send message to chat ID {update.message.chat_id}")
-    except Unauthorized as e:
-        logger.warning(f"Unauthorized: {e}. Bot was removed from chat ID {update.message.chat_id}")
-    except NetworkError as e:
-        logger.warning(f"NetworkError: {e}. Retrying...")
-    except Exception as e:
-        logger.error(f"Unexpected error: {e}")
+    except (Unauthorized, NetworkError) as e:
+        logger.warning(f"Error sending message: {e}")
 
 # Function to post a new character from the database to the chat
 def post_random_character(update=None, context=None):
@@ -105,31 +105,27 @@ def help_command(update: Update, context: CallbackContext) -> None:
     ⍟ /start - Start the bot and begin character posting 🚀
     ⍟ /hello - Check if the bot is active ✅
     ⍟ /help - Show this help message 📋
-    ⍟ /upload [image_url] [character_name] [rarity] - Add a new character (admin only) 👤
+    ⍟ /upload [image_url] [character_name] - Add a new character (admin only, rarity assigned automatically) 👤
     ⍟ /stats - (Owner only) View all user levels 📊
     ⍟ /leaderboard - View the top players by level 🏆
     ⍟ /profile - View your current level, rank, and coins 🧍‍♂️
     """
     safe_send_message(update, help_text, parse_mode=ParseMode.MARKDOWN)
 
-# Admin-only command to upload a new character
+# Admin-only command to upload a new character with automatic rarity assignment
 def upload(update: Update, context: CallbackContext) -> None:
     user_id = update.message.from_user.id
     if user_id not in ADMIN_IDS:
         safe_send_message(update, "🚫 You don't have permission to use this command.")
         return
 
-    if len(context.args) < 3:
-        safe_send_message(update, "⚙️ Usage: /upload [image_url] [character_name] [rarity]")
+    if len(context.args) < 2:
+        safe_send_message(update, "⚙️ Usage: /upload [image_url] [character_name]")
         return
 
     image_url = context.args[0]
-    rarity = context.args[-1].lower()
-    character_name = " ".join(context.args[1:-1])
-
-    if rarity not in RARITY_EMOJIS:
-        safe_send_message(update, "❗ Invalid rarity. Rarity must be one of: bronze, silver, gold, platinum, diamond.")
-        return
+    character_name = " ".join(context.args[1:])
+    rarity = random.choice(RARITY_CHOICES)  # Assign a random rarity
 
     character_data = {
         "name": character_name,
@@ -177,15 +173,12 @@ def handle_guess(update: Update, context: CallbackContext) -> None:
                 parse_mode=ParseMode.MARKDOWN
             )
         except BadRequest as e:
-            logger.warning(f"Failed to send image message: {e}")
+            logger.warning(f"Failed to send image message due to BadRequest: {e}")
         post_random_character(update)  # Reset after correct guess
-    else:
-        safe_send_message(update, "❌ Incorrect guess! Try again.")
 
     # Increase message count and check if threshold is reached
     message_count += 1
     if message_count >= THRESHOLD_MESSAGES:
-        safe_send_message(update, "Threshold reached. Here’s a new character to guess.")
         post_random_character(update)
 
 # Profile command to view user's current level, rank, and coins
@@ -208,6 +201,21 @@ def profile(update: Update, context: CallbackContext) -> None:
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     safe_send_message(update, profile_message, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
+
+# Leaderboard command to view the top players by level
+def leaderboard(update: Update, context: CallbackContext) -> None:
+    top_users = list(users_collection.find().sort("level", -1).limit(10))
+    if not top_users:
+        safe_send_message(update, "🏆 No players on the leaderboard yet!")
+        return
+
+    leaderboard_message = "🏆 *Top Players Leaderboard* 🏆\n\n"
+    rank = 1
+    for user in top_users:
+        leaderboard_message += f"{rank}. @{user['username']} - Level {user['level']} 🌟\n"
+        rank += 1
+
+    safe_send_message(update, leaderboard_message, parse_mode=ParseMode.MARKDOWN)
 
 # Main function to start the bot
 def main():
