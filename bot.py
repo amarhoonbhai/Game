@@ -25,7 +25,7 @@ try:
     db = client['philo_game']
     users_collection = db['users']
     characters_collection = db['characters']
-    sudo_collection = db['sudo_users']
+    sudo_users_collection = db['sudo_users']  # Collection to manage sudo users
     print("✅ Connected to MongoDB successfully.")
 except errors.ServerSelectionTimeoutError as err:
     print(f"Error: Could not connect to MongoDB: {err}")
@@ -81,8 +81,8 @@ def show_help(message):
 /profile - View your stats and game progress
 /levels - Show top players by coins
 /stats - Show bot statistics
-/upload - Upload a new character (admin only)
-/addsudo - Add a user as sudo (admin only)
+/upload <image_url> <character_name> - Upload a new character (admin only)
+/addsudo <user_id> - Add a new sudo user (admin only)
 """
     bot.reply_to(message, help_message)
 
@@ -138,42 +138,34 @@ def show_stats(message):
         f"📊 Bot Stats:\n👥 Total Users: {total_users}\n🎭 Characters: {total_characters}"
     )
 
-# Sending and Handling Characters
-def send_character(chat_id):
-    global current_character
-    current_character = fetch_new_character()
-    if current_character:
-        rarity = assign_rarity()
-        caption = f"🎉 A new {rarity} character has appeared! Guess the name to earn coins!"
-        bot.send_photo(chat_id, current_character['image_url'], caption=caption)
+# Check if user is sudo
+def is_sudo_user(user_id):
+    return sudo_users_collection.find_one({"user_id": user_id}) is not None
 
-@bot.message_handler(func=lambda message: True)
-def handle_message(message):
-    global global_message_count, current_character
+# Adding a sudo user
+@bot.message_handler(commands=['addsudo'])
+def add_sudo_user(message):
     user_id = message.from_user.id
-    user_guess = message.text.strip().lower() if message.text else ""
+    if user_id == BOT_OWNER_ID:
+        msg_parts = message.text.split()
+        if len(msg_parts) == 2:
+            try:
+                sudo_user_id = int(msg_parts[1])
+                sudo_users_collection.insert_one({"user_id": sudo_user_id})
+                bot.reply_to(message, f"✅ Added user {sudo_user_id} as sudo.")
+            except ValueError:
+                bot.reply_to(message, "🚫 Invalid user ID format.")
+        else:
+            bot.reply_to(message, "Usage: /addsudo <user_id>")
+    else:
+        bot.reply_to(message, "🚫 You don't have permission to use this command.")
 
-    if message.chat.type in ['group', 'supergroup']:
-        global_message_count += 1
-        if global_message_count >= MESSAGE_THRESHOLD:
-            send_character(message.chat.id)
-            global_message_count = 0
-
-    if current_character and user_guess:
-        if user_guess in current_character['character_name'].strip().lower():
-            user = get_user_data(user_id)
-            new_coins = user['coins'] + COINS_PER_GUESS
-            update_user_data(user_id, {'coins': new_coins, 'correct_guesses': user['correct_guesses'] + 1})
-            bot.reply_to(message, f"🎉 Correct! You've earned {COINS_PER_GUESS} coins.")
-            send_character(message.chat.id)  # Send a new character immediately
-
-# Admin-only upload command
+# Upload a character (for bot owner or sudo users)
 @bot.message_handler(commands=['upload'])
 def upload_character(message):
     user_id = message.from_user.id
-    is_sudo = sudo_collection.find_one({'user_id': user_id})
-    if user_id == BOT_OWNER_ID or is_sudo:
-        msg_parts = message.text.split()
+    if user_id == BOT_OWNER_ID or is_sudo_user(user_id):
+        msg_parts = message.text.split(maxsplit=2)
         if len(msg_parts) == 3:
             image_url, character_name = msg_parts[1], msg_parts[2]
             characters_collection.insert_one({
@@ -186,24 +178,6 @@ def upload_character(message):
             bot.reply_to(message, "Usage: /upload <image_url> <character_name>")
     else:
         bot.reply_to(message, "🚫 You don't have permission to use this command.")
-
-@bot.message_handler(commands=['addsudo'])
-def add_sudo(message):
-    user_id = message.from_user.id
-    if user_id == BOT_OWNER_ID:
-        msg_parts = message.text.split()
-        if len(msg_parts) == 2:
-            sudo_user_id = int(msg_parts[1])
-            sudo_collection.update_one(
-                {'user_id': sudo_user_id},
-                {'$set': {'user_id': sudo_user_id}},
-                upsert=True
-            )
-            bot.reply_to(message, f"✅ User {sudo_user_id} has been added as a sudo user.")
-        else:
-            bot.reply_to(message, "Usage: /addsudo <user_id>")
-    else:
-        bot.reply_to(message, "🚫 Only the bot owner can add sudo users.")
 
 # Start bot polling
 bot.infinity_polling(timeout=60, long_polling_timeout=60)
