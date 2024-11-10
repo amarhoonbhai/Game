@@ -1,21 +1,21 @@
-# Anime Character Guessing Game Bot
+# Philo Game Bot
 
-This is a Telegram bot where players guess anime characters and earn coins! The bot fetches character data from the AniList API and keeps track of player scores and daily rewards.
+Philo Game Bot is an interactive Telegram bot where users can guess anime characters, collect rare items, earn coins, and compete on leaderboards. With levels, daily bonuses, and customizable character rarities, Philo Game Bot provides an exciting experience for anime enthusiasts!
 
 ## Features
-- Players can guess anime characters from hints.
-- Earn coins for correct guesses.
-- Claim daily rewards.
-- Leaderboard to display top players.
+- **Guess Characters:** Users guess anime characters based on images.
+- **Levels:** Progress through levels based on correct guesses.
+- **Daily Bonuses:** Claim coins daily and maintain streaks for bonus rewards.
+- **Leaderboards:** Compete with other users based on levels and coins.
+- **Sudo User Management:** Admin commands for adding sudo users and uploading characters.
 
-## Requirements
-- Python 3.x
-- Telegram Bot API Token (Get from [BotFather](https://core.telegram.org/bots#botfather))
+## Setup Instructions
 
-## Setup
+### Prerequisites
+- Python 3.8 or later
+- MongoDB (Atlas or local instance)
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/your-username/anime-character-guessing-game.git
-   cd anime-character-guessing-game
-   
+### Clone the Repository
+```bash
+git clone https://github.com/Philo69/Game.git
+cd Game
