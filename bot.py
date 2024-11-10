@@ -1,179 +1,220 @@
-import logging
-import os
-from telegram import Update, ParseMode, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
-from pymongo import MongoClient
-from dotenv import load_dotenv
-from telegram.error import TelegramError, BadRequest, Unauthorized
+import telebot
+import random
+from pymongo import MongoClient, errors
+from datetime import datetime, timedelta
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# Load environment variables
-load_dotenv()
-TOKEN = os.getenv("TOKEN")
-MONGO_URI = os.getenv("MONGO_URI")
-OWNER_ID = int(os.getenv("OWNER_ID", 0))
+# Configuration
+API_TOKEN = "7579121046:AAELIFFwb0bxuVPFtJrV1J76JNb8Z0ZUo2Q"
+BOT_OWNER_ID = 123456789  # Replace with the bot owner's Telegram ID
+CHANNEL_ID = -100123456789  # Replace with your Telegram channel ID where characters are logged
+MONGO_URI = "YOUR_MONGO_URI"
+BONUS_COINS = 5000
+COINS_PER_GUESS = 50
+STREAK_BONUS_COINS = 1000
+MESSAGE_THRESHOLD = 5
+RARITY_LEVELS = {
+    'Common': '⭐',
+    'Rare': '🌟',
+    'Epic': '💎',
+    'Legendary': '✨'
+}
+RARITY_WEIGHTS = [60, 25, 10, 5]
+TOP_LEADERBOARD_LIMIT = 10
 
-# MongoDB connection
+# Setup MongoDB connection
 try:
     client = MongoClient(MONGO_URI)
-    db = client['waifu_bot']
+    db = client['game_database']
     users_collection = db['users']
     characters_collection = db['characters']
-    logging.info("✅ MongoDB connected successfully.")
-except Exception as e:
-    logging.error(f"Failed to connect to MongoDB: {e}")
+    print("✅ MongoDB connected successfully.")
+except errors.ServerSelectionTimeoutError as err:
+    print(f"Error: Could not connect to MongoDB: {err}")
+    exit()
 
-# Logging configuration
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+bot = telebot.TeleBot(API_TOKEN)
 
-# Helper function to safely send messages
-def safe_send_message(update: Update, text: str, **kwargs) -> None:
-    try:
-        update.message.reply_text(text, **kwargs)
-    except (TelegramError, BadRequest, Unauthorized) as e:
-        logging.error(f"Failed to send message: {e}")
+# Correct guess captions
+CORRECT_GUESS_CAPTIONS = [
+    "🎉 Brilliant guess! You got it right!",
+    "🌟 Well done! You truly know your anime characters!",
+    "🔥 Amazing! You nailed it!",
+    "🥳 Correct! Your anime knowledge is impressive!",
+    "🎊 Spot on! Keep up the great guessing!",
+    "💥 Bingo! That’s the one!",
+    "👏 Fantastic! You’re on fire with these guesses!"
+]
 
-# /start command
-def start(update: Update, context: CallbackContext) -> None:
-    logging.info("Received /start command")
-    welcome_message = "👋 Welcome to the Waifu Bot! Start guessing characters to earn coins and level up!"
-    safe_send_message(update, welcome_message, parse_mode=ParseMode.MARKDOWN)
+# Global variables
+current_character = None
+global_message_count = 0
 
-# /hello command to check bot activity
-def hello(update: Update, context: CallbackContext) -> None:
-    logging.info("Received /hello command")
-    safe_send_message(update, "🤖 Bot is active and ready!")
+# Helper Functions
+def get_user_data(user_id):
+    user = users_collection.find_one({'user_id': user_id})
+    if user is None:
+        new_user = {
+            'user_id': user_id,
+            'coins': 0,
+            'correct_guesses': 0,
+            'inventory': [],
+            'last_bonus': None,
+            'streak': 0
+        }
+        users_collection.insert_one(new_user)
+        return new_user
+    return user
 
-# /help command
-def help_command(update: Update, context: CallbackContext) -> None:
-    logging.info("Received /help command")
-    help_message = (
-        "📜 *Help Menu* 📜\n\n"
-        "/start - Start the bot\n"
-        "/hello - Check if bot is active\n"
-        "/upload - Upload a new character\n"
-        "/leaderboard - View the leaderboard\n"
-        "/profile - View your profile\n"
-        "/stats - View bot stats (Owner only)\n"
-    )
-    safe_send_message(update, help_message, parse_mode=ParseMode.MARKDOWN)
+def update_user_data(user_id, update_data):
+    users_collection.update_one({'user_id': user_id}, {'$set': update_data})
 
-# /upload command (only for character uploads by owner)
-def upload(update: Update, context: CallbackContext) -> None:
-    user_id = update.message.from_user.id
-    logging.info(f"Received /upload command from user_id={user_id}")
+def fetch_new_character():
+    characters = list(characters_collection.find())
+    return random.choice(characters) if characters else None
 
-    if user_id != OWNER_ID:
-        safe_send_message(update, "⚠️ Uploading is restricted to the owner.")
-        return
+def assign_rarity():
+    return random.choices(list(RARITY_LEVELS.keys()), weights=RARITY_WEIGHTS, k=1)[0]
 
-    args = context.args
-    if len(args) < 2:
-        safe_send_message(update, "Usage: /upload <character_name> <rarity>")
-        return
-
-    character_name, rarity = args[0], args[1]
-    characters_collection.insert_one({"name": character_name, "rarity": rarity})
-    safe_send_message(update, f"✅ Character '{character_name}' with rarity '{rarity}' uploaded successfully!")
-
-# /leaderboard command
-def leaderboard(update: Update, context: CallbackContext) -> None:
-    logging.info("Received /leaderboard command")
-    top_users = list(users_collection.find().sort("level", -1).limit(10))
-
-    if not top_users:
-        safe_send_message(update, "🏆 No players on the leaderboard yet!")
-        return
-
-    leaderboard_message = "🏆 *Top Players Leaderboard* 🏆\n\n"
-    for rank, user in enumerate(top_users, 1):
-        leaderboard_message += f"{rank}. @{user.get('username', 'Unknown')} - Level {user['level']} 🌟\n"
-    
-    safe_send_message(update, leaderboard_message, parse_mode=ParseMode.MARKDOWN)
-
-# /profile command
-def profile(update: Update, context: CallbackContext) -> None:
-    user_id = update.message.from_user.id
-    logging.info(f"Received /profile command from user_id={user_id}")
-
-    user = users_collection.find_one({"user_id": user_id})
-    if user:
-        profile_message = (
-            f"👤 *{user.get('username', 'Unknown')}'s Profile*\n\n"
-            f"🌟 Level: {user['level']}\n"
-            f"💰 Coins: {user['coins']}\n"
+def send_character(chat_id):
+    global current_character
+    current_character = fetch_new_character()
+    if current_character:
+        rarity = RARITY_LEVELS[current_character['rarity']]
+        caption = (
+            f"🎨 Guess the Anime Character!\n\n"
+            f"💬 Name: ???\n"
+            f"⚔️ Rarity: {rarity} {current_character['rarity']}\n"
         )
-    else:
-        profile_message = "🚫 You don't have a profile yet. Start guessing characters to level up and earn coins!"
+        try:
+            bot.send_photo(chat_id, current_character['image_url'], caption=caption)
+        except Exception as e:
+            print(f"Error sending character image: {e}")
+            bot.send_message(chat_id, "❌ Unable to send character image.")
 
-    keyboard = [[InlineKeyboardButton("Developer - @TechPiro", url="https://t.me/TechPiro")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    safe_send_message(update, profile_message, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
+# Command Handlers
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    welcome_message = """
+<b>Welcome to the Anime Guessing Game!</b>
 
-# /stats command (owner-only)
-def stats(update: Update, context: CallbackContext) -> None:
-    user_id = update.message.from_user.id
-    logging.info(f"Received /stats command from user_id={user_id}")
+🎮 Ready to dive into the world of anime characters? Let’s start collecting and guessing!
 
-    if user_id != OWNER_ID:
-        safe_send_message(update, "🚫 You don't have permission to access the stats.")
+Use the commands below to explore all the features!
+"""
+    markup = InlineKeyboardMarkup()
+    developer_button = InlineKeyboardButton(text="Developer", url="https://t.me/YourDeveloperLink")
+    markup.add(developer_button)
+
+    bot.send_message(message.chat.id, welcome_message, parse_mode='HTML', reply_markup=markup)
+
+@bot.message_handler(commands=['bonus'])
+def claim_bonus(message):
+    user_id = message.from_user.id
+    user = get_user_data(user_id)
+    current_time = datetime.now()
+
+    if user['last_bonus']:
+        time_since_last_bonus = current_time - user['last_bonus']
+        if time_since_last_bonus < timedelta(days=1):
+            time_remaining = timedelta(days=1) - time_since_last_bonus
+            hours, remainder = divmod(time_remaining.seconds, 3600)
+            minutes, _ = divmod(remainder, 60)
+            bot.reply_to(message, f"🎁 You've already claimed your bonus today! Come back in {hours} hours and {minutes} minutes.")
+            return
+
+    new_coins = user['coins'] + BONUS_COINS
+    user['streak'] += 1
+    streak_bonus = STREAK_BONUS_COINS * user['streak']
+
+    update_user_data(user_id, {
+        'coins': new_coins + streak_bonus,
+        'last_bonus': current_time,
+        'streak': user['streak']
+    })
+
+    bot.reply_to(message, f"🎉 You claimed your daily bonus of {BONUS_COINS} coins!\n"
+                          f"🔥 Streak Bonus: {streak_bonus} coins for a {user['streak']}-day streak!")
+
+@bot.message_handler(commands=['upload'])
+def upload_character(message):
+    if message.from_user.id not in [BOT_OWNER_ID] + SUDO_USERS:
         return
 
-    total_users = users_collection.count_documents({})
-    avg_level = users_collection.aggregate([{"$group": {"_id": None, "avgLevel": {"$avg": "$level"}}}])
-    avg_level = next(avg_level, {}).get("avgLevel", 0)
+    parts = message.text.split()
+    if len(parts) < 4:
+        bot.reply_to(message, "Usage: /upload <image_url> <character_name> <rarity>")
+        return
 
-    stats_message = (
-        f"📊 *Bot Statistics* 📊\n\n"
-        f"👥 Total Users: {total_users}\n"
-        f"📈 Average Level: {avg_level:.2f}\n"
-    )
-    safe_send_message(update, stats_message, parse_mode=ParseMode.MARKDOWN)
+    image_url = parts[1]
+    character_name = parts[2]
+    rarity = parts[3].capitalize()
 
-# Handle character guesses
-def handle_guess(update: Update, context: CallbackContext) -> None:
-    guess = update.message.text.strip()
-    logging.info(f"Received guess: '{guess}' from user_id={update.message.from_user.id}")
-    character = characters_collection.find_one({"name": guess})
+    if rarity not in RARITY_LEVELS:
+        bot.reply_to(message, f"Invalid rarity! Choose from: {', '.join(RARITY_LEVELS.keys())}")
+        return
 
-    if character:
-        user_id = update.message.from_user.id
-        username = update.message.from_user.username or "Unknown"
-        user = users_collection.find_one({"user_id": user_id})
+    character = {
+        'image_url': image_url,
+        'character_name': character_name,
+        'rarity': rarity
+    }
+    characters_collection.insert_one(character)
+    bot.reply_to(message, f"Character '{character_name}' uploaded successfully with {RARITY_LEVELS[rarity]} rarity!")
 
-        if not user:
-            user = {"user_id": user_id, "username": username, "level": 1, "coins": 0}
-            users_collection.insert_one(user)
-            logging.info(f"New user profile created for user_id={user_id}")
+@bot.message_handler(commands=['help'])
+def show_help(message):
+    help_message = """
+<b>Available Commands:</b>
 
-        users_collection.update_one({"user_id": user_id}, {"$inc": {"level": 1, "coins": 10}})
-        safe_send_message(update, f"🎉 Correct! You guessed '{character['name']}'! Level up! +10 coins.")
-    else:
-        safe_send_message(update, "❌ Incorrect guess. Try again!")
+🎮 <b>Gameplay:</b>
+/bonus - Claim your daily bonus
+/upload <img_url> <name> <rarity> - Upload a new character (admin only)
+/help - Show this help message
+"""
+    bot.reply_to(message, help_message, parse_mode='HTML')
 
-# Main function to start the bot
-def main():
-    logging.info("Starting bot...")
-    updater = Updater(TOKEN)
-    dispatcher = updater.dispatcher
+# Detect guesses in all messages
+@bot.message_handler(func=lambda message: True)
+def handle_all_messages(message):
+    global current_character
+    global global_message_count
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    user_guess = message.text.strip().lower() if message.text else ""
 
-    # Register command handlers
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CommandHandler("hello", hello))
-    dispatcher.add_handler(CommandHandler("help", help_command))
-    dispatcher.add_handler(CommandHandler("upload", upload))
-    dispatcher.add_handler(CommandHandler("leaderboard", leaderboard))
-    dispatcher.add_handler(CommandHandler("profile", profile))
-    dispatcher.add_handler(CommandHandler("stats", stats))
+    if message.chat.type in ['group', 'supergroup']:
+        global_message_count += 1
 
-    # Register message handler for guesses
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_guess))
+    if global_message_count >= MESSAGE_THRESHOLD:
+        send_character(chat_id)
+        global_message_count = 0
 
-    # Start polling and log the polling status
-    updater.start_polling()
-    logging.info("Bot is now polling for updates...")
+    if current_character and user_guess:
+        character_name = current_character['character_name'].strip().lower()
 
-    # Run the bot until manually stopped
-    updater.idle()
+        if user_guess in character_name:
+            user = get_user_data(user_id)
+            new_coins = user['coins'] + COINS_PER_GUESS
+            user['correct_guesses'] += 1
+            user['streak'] += 1
+            streak_bonus = STREAK_BONUS_COINS * user['streak']
 
-if __name__ == '__main__':
-    main()
+            update_user_data(user_id, {
+                'coins': new_coins + streak_bonus,
+                'correct_guesses': user['correct_guesses'],
+                'streak': user['streak'],
+                'inventory': user['inventory'] + [current_character]
+            })
+
+            # Random caption for correct guess
+            correct_guess_caption = random.choice(CORRECT_GUESS_CAPTIONS)
+            bot.reply_to(message, f"{correct_guess_caption}\n\n"
+                                  f"💰 You've earned {COINS_PER_GUESS} coins!\n"
+                                  f"🔥 Streak Bonus: {streak_bonus} coins for a {user['streak']}-guess streak!")
+
+            # Send a new character after a correct guess
+            send_character(chat_id)
+
+# Start polling the bot
+bot.infinity_polling(timeout=60, long_polling_timeout=60)
