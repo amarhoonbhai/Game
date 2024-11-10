@@ -1,50 +1,40 @@
-import telebot
+import os
 import random
-from pymongo import MongoClient, errors
 from datetime import datetime, timedelta
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pymongo import MongoClient, errors
+from telebot import TeleBot, types
+from dotenv import load_dotenv
 
-# Bot Token and MongoDB URI
-API_TOKEN = "7579121046:AAEc0CkNM3hjKtneFRNaU4bXIa3yueRyHFM"
-MONGO_URI = "mongodb+srv://PhiloWise:Philo@waifu.yl9tohm.mongodb.net/?retryWrites=true&w=majority&appName=Waifu"
+# Load environment variables from .env file
+load_dotenv()
+API_TOKEN = os.getenv("API_TOKEN")
+MONGO_URI = os.getenv("MONGO_URI")
+BOT_OWNER_ID = int(os.getenv("BOT_OWNER_ID"))
+CHARACTER_CHANNEL_ID = int(os.getenv("CHARACTER_CHANNEL_ID"))
+BONUS_COINS = int(os.getenv("BONUS_COINS"))
+STREAK_BONUS_COINS = int(os.getenv("STREAK_BONUS_COINS"))
+COINS_PER_GUESS = int(os.getenv("COINS_PER_GUESS"))
+MESSAGE_THRESHOLD = int(os.getenv("MESSAGE_THRESHOLD"))
+TOP_LEADERBOARD_LIMIT = int(os.getenv("TOP_LEADERBOARD_LIMIT"))
 
-# Admin and Channel Information
-BOT_OWNER_ID = 7222795580
-CHANNEL_ID = -1002438449944
+# Initialize bot and MongoDB
+bot = TeleBot(API_TOKEN)
 
-# Bot Initialization
-bot = telebot.TeleBot(API_TOKEN)
-
-# MongoDB Connection
 try:
     client = MongoClient(MONGO_URI)
-    db = client['philo_grabber']
+    db = client['philo_game']
     users_collection = db['users']
     characters_collection = db['characters']
-    groups_collection = db['groups']
-    print("✅ MongoDB connected successfully.")
+    print("✅ Connected to MongoDB successfully.")
 except errors.ServerSelectionTimeoutError as err:
     print(f"Error: Could not connect to MongoDB: {err}")
     exit()
 
-# Settings
-BONUS_COINS = 5000
-BONUS_INTERVAL = timedelta(days=1)
-COINS_PER_GUESS = 50
-LEVEL_INCREMENT = 5
-STREAK_BONUS_COINS = 1000
-RARITY_LEVELS = {'Common': '⭐', 'Rare': '🌟', 'Epic': '💎', 'Legendary': '✨'}
-RARITY_WEIGHTS = [60, 25, 10, 5]
-MESSAGE_THRESHOLD = 5
-
-# Sudo Users
-SUDO_USERS = [BOT_OWNER_ID]
-
-# Global variables to track the current character and message count
+# Track messages and character
 current_character = None
-global_message_count = 0  # Global counter for messages in all chats
+global_message_count = 0
 
-# Helper Functions
+# Utility Functions
 def get_user_data(user_id):
     user = users_collection.find_one({'user_id': user_id})
     if not user:
@@ -55,7 +45,7 @@ def get_user_data(user_id):
             'inventory': [],
             'last_bonus': None,
             'streak': 0,
-            'profile': None
+            'profile_name': ""
         }
         users_collection.insert_one(new_user)
         return new_user
@@ -65,185 +55,133 @@ def update_user_data(user_id, update_data):
     users_collection.update_one({'user_id': user_id}, {'$set': update_data})
 
 def assign_rarity():
-    return random.choices(list(RARITY_LEVELS.keys()), weights=RARITY_WEIGHTS, k=1)[0]
+    rarity_levels = {'Common': '⭐', 'Rare': '🌟', 'Epic': '💎', 'Legendary': '✨'}
+    weights = [60, 25, 10, 5]
+    return random.choices(list(rarity_levels.keys()), weights=weights, k=1)[0]
 
 def fetch_new_character():
     characters = list(characters_collection.find())
     return random.choice(characters) if characters else None
-
-def get_user_level(correct_guesses):
-    return (correct_guesses // LEVEL_INCREMENT) + 1
 
 # Command Handlers
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     user_id = message.from_user.id
     user = get_user_data(user_id)
-    profile_name = message.from_user.full_name
-    if not user['profile']:
-        update_user_data(user_id, {'profile': profile_name})
-
-    welcome_message = """
-<b>🎮 Welcome to Philo Game! 🎮</b>
-
-Prepare to dive into the ultimate anime character guessing game! ✨ Collect rare characters, climb the leaderboard, and show off your anime knowledge. 🌟
-
-Use <b>/help</b> to see all the commands and start your journey. Have fun and good luck on your adventure! 🏆
-"""
-    markup = InlineKeyboardMarkup()
-    developer_button = InlineKeyboardButton(text="👨‍💻 Developer - @TechPiro", url="https://t.me/TechPiro")
-    markup.add(developer_button)
-
-    bot.send_message(message.chat.id, welcome_message, parse_mode='HTML', reply_markup=markup)
+    user_name = message.from_user.full_name
+    update_user_data(user_id, {'profile_name': user_name})
+    bot.reply_to(message, f"🎉 Welcome to Philo Game, {user_name}! 🎮 Use /help to see available commands.")
 
 @bot.message_handler(commands=['help'])
 def show_help(message):
     help_message = """
-<b>💡 Available Commands 💡</b>
-/bonus - Claim your daily bonus 💰
-/stats - Show bot stats 📊
-/profile - View your profile 📋
-/levels - Show top users by level 🏆
-/addsudo [user_id] - Add sudo user (Admin only) 🔧
-/upload [image_url] [character_name] - Upload a character (Sudo only) 🖼️
+/start - Welcome message and profile creation
+/bonus - Claim daily bonus coins
+/profile - View your stats and game progress
+/levels - Show top players by coins
+/stats - Show bot statistics
 """
-    bot.reply_to(message, help_message, parse_mode='HTML')
+    bot.reply_to(message, help_message)
 
 @bot.message_handler(commands=['bonus'])
 def claim_bonus(message):
     user_id = message.from_user.id
     user = get_user_data(user_id)
-    current_time = datetime.now()
+    now = datetime.now()
 
     if user['last_bonus']:
-        time_since_last_bonus = current_time - user['last_bonus']
-        if time_since_last_bonus < BONUS_INTERVAL:
-            remaining_time = BONUS_INTERVAL - time_since_last_bonus
-            hours, remainder = divmod(remaining_time.seconds, 3600)
+        time_since_bonus = now - user['last_bonus']
+        if time_since_bonus < timedelta(days=1):
+            time_left = timedelta(days=1) - time_since_bonus
+            hours, remainder = divmod(time_left.seconds, 3600)
             minutes, _ = divmod(remainder, 60)
-            bot.reply_to(message, f"🕒 Bonus already claimed! Try again in {hours}h {minutes}m.")
+            bot.reply_to(message, f"⏳ Come back in {hours}h {minutes}m for your next bonus!")
             return
 
-    new_coins = user['coins'] + BONUS_COINS
-    user['streak'] += 1
-    streak_bonus = STREAK_BONUS_COINS * user['streak']
+    new_coins = user['coins'] + BONUS_COINS + (user['streak'] * STREAK_BONUS_COINS)
     update_user_data(user_id, {
-        'coins': new_coins + streak_bonus,
-        'last_bonus': current_time,
-        'streak': user['streak']
+        'coins': new_coins,
+        'last_bonus': now,
+        'streak': user['streak'] + 1
     })
-
-    bot.reply_to(message, f"🎉 You claimed {BONUS_COINS} coins!\n🔥 Streak Bonus: {streak_bonus} coins!")
-
-@bot.message_handler(commands=['stats'])
-def show_bot_stats(message):
-    total_users = users_collection.count_documents({})
-    total_characters = characters_collection.count_documents({})
-    total_groups = groups_collection.count_documents({})
-
-    bot.reply_to(message, f"<b>📊 Bot Stats 📊</b>\n\n"
-                          f"👥 Total Users: {total_users}\n"
-                          f"🌌 Total Characters: {total_characters}\n"
-                          f"💬 Total Groups: {total_groups}", parse_mode='HTML')
+    bot.reply_to(message, f"💰 You received {BONUS_COINS} coins and a streak bonus! Total coins: {new_coins}.")
 
 @bot.message_handler(commands=['profile'])
 def show_profile(message):
     user_id = message.from_user.id
     user = get_user_data(user_id)
-    level = get_user_level(user['correct_guesses'])
-    
-    profile_message = (f"<b>👤 Profile of {user['profile']} 👤</b>\n\n"
-                       f"💰 Coins: {user['coins']}\n"
-                       f"🎖️ Level: {level}\n"
-                       f"🔥 Streak: {user['streak']} days\n"
-                       f"✅ Correct Guesses: {user['correct_guesses']}")
-    bot.reply_to(message, profile_message, parse_mode='HTML')
+    profile_text = (
+        f"👤 <b>Profile of {user['profile_name']}</b>\n"
+        f"💰 Coins: {user['coins']}\n"
+        f"🎯 Correct Guesses: {user['correct_guesses']}\n"
+        f"🔥 Streak: {user['streak']}\n"
+    )
+    bot.reply_to(message, profile_text, parse_mode='HTML')
 
 @bot.message_handler(commands=['levels'])
-def show_top_levels(message):
-    top_users = users_collection.find().sort("correct_guesses", -1).limit(10)
-    levels_message = "<b>🏆 Top Users by Level 🏆</b>\n\n"
-    for i, user in enumerate(top_users, start=1):
-        level = get_user_level(user['correct_guesses'])
-        profile_name = user['profile'] if user['profile'] else "Unknown User"
-        levels_message += f"{i}. {profile_name} - Level {level} 🎖️\n"
-    bot.reply_to(message, levels_message, parse_mode='HTML')
+def show_levels(message):
+    top_users = users_collection.find().sort("coins", -1).limit(TOP_LEADERBOARD_LIMIT)
+    leaderboard = "🏆 <b>Top Players</b> 🏆\n\n"
+    for i, user in enumerate(top_users, 1):
+        leaderboard += f"{i}. {user['profile_name']} - {user['coins']} coins\n"
+    bot.reply_to(message, leaderboard, parse_mode='HTML')
 
-@bot.message_handler(commands=['upload'])
-def upload_character(message):
-    if message.from_user.id not in SUDO_USERS:
-        bot.reply_to(message, "❌ You do not have permission to use this command.")
-        return
+@bot.message_handler(commands=['stats'])
+def show_stats(message):
+    total_users = users_collection.count_documents({})
+    total_characters = characters_collection.count_documents({})
+    bot.reply_to(
+        message,
+        f"📊 Bot Stats:\n👥 Total Users: {total_users}\n🎭 Characters: {total_characters}"
+    )
 
-    try:
-        _, image_url, character_name = message.text.split(maxsplit=2)
-        rarity = assign_rarity()
-        character = {'image_url': image_url, 'character_name': character_name, 'rarity': rarity}
-        characters_collection.insert_one(character)
-        bot.reply_to(message, f"✅ Character '{character_name}' added with rarity '{rarity}'!")
-    except ValueError:
-        bot.reply_to(message, "⚠️ Please use the format: /upload [image_url] [character_name]")
-
-@bot.message_handler(commands=['addsudo'])
-def add_sudo_user(message):
-    if message.from_user.id != BOT_OWNER_ID:
-        bot.reply_to(message, "❌ Only the bot owner can add sudo users.")
-        return
-
-    try:
-        _, new_sudo_id = message.text.split()
-        new_sudo_id = int(new_sudo_id)
-        if new_sudo_id not in SUDO_USERS:
-            SUDO_USERS.append(new_sudo_id)
-            bot.reply_to(message, f"✅ User ID {new_sudo_id} added as sudo user.")
-        else:
-            bot.reply_to(message, f"⚠️ User ID {new_sudo_id} is already a sudo user.")
-    except (ValueError, IndexError):
-        bot.reply_to(message, "⚠️ Please provide a valid user ID to add as sudo.")
-
-# Handle All Messages and Check for Character Guesses
-@bot.message_handler(func=lambda message: True)
-def handle_all_messages(message):
-    global current_character
-    global global_message_count
-    chat_id = message.chat.id
-    user_id = message.from_user.id
-    user_guess = message.text.strip().lower() if message.text else ""
-    global_message_count += 1
-
-    if global_message_count >= MESSAGE_THRESHOLD:
-        send_character(chat_id)
-        global_message_count = 0
-
-    if current_character and user_guess:
-        character_name = current_character['character_name'].strip().lower()
-        if user_guess in character_name:
-            user = get_user_data(user_id)
-            new_coins = user['coins'] + COINS_PER_GUESS
-            user['correct_guesses'] += 1
-            level = get_user_level(user['correct_guesses'])
-            update_user_data(user_id, {'coins': new_coins, 'correct_guesses': user['correct_guesses']})
-
-            correct_guess_captions = [
-                "🎉 Amazing! You've guessed correctly!",
-                "✨ You're on fire! Another correct guess!",
-                "💯 You're unstoppable!",
-                "🔥 Right on! You nailed it!",
-                "🎊 Another one for your collection!",
-                "👏 Great job, you guessed it!",
-                "🥳 Bingo! You're amazing!"
-            ]
-            bot.reply_to(message, random.choice(correct_guess_captions) + f" You earned {COINS_PER_GUESS} coins! 🎖️ Level {level}")
-            send_character(chat_id)
-
-# Send Random Character to Chat
+# Sending and Handling Characters
 def send_character(chat_id):
     global current_character
     current_character = fetch_new_character()
     if current_character:
-        rarity = RARITY_LEVELS[current_character['rarity']]
-        caption = f"🔍 Guess the Character!\n🌠 Rarity: {rarity}\n🎭 Name: ???"
+        rarity = assign_rarity()
+        caption = f"🎉 A new {rarity} character has appeared! Guess the name to earn coins!"
         bot.send_photo(chat_id, current_character['image_url'], caption=caption)
 
-# Start polling the bot
+@bot.message_handler(func=lambda message: True)
+def handle_message(message):
+    global global_message_count, current_character
+    user_id = message.from_user.id
+    user_guess = message.text.strip().lower() if message.text else ""
+
+    if message.chat.type in ['group', 'supergroup']:
+        global_message_count += 1
+        if global_message_count >= MESSAGE_THRESHOLD:
+            send_character(message.chat.id)
+            global_message_count = 0
+
+    if current_character and user_guess:
+        if user_guess in current_character['character_name'].strip().lower():
+            user = get_user_data(user_id)
+            new_coins = user['coins'] + COINS_PER_GUESS
+            update_user_data(user_id, {'coins': new_coins, 'correct_guesses': user['correct_guesses'] + 1})
+            bot.reply_to(message, f"🎉 Correct! You've earned {COINS_PER_GUESS} coins.")
+            send_character(message.chat.id)  # Send a new character immediately
+
+# Admin-only upload command
+@bot.message_handler(commands=['upload'])
+def upload_character(message):
+    user_id = message.from_user.id
+    if user_id == BOT_OWNER_ID:
+        msg_parts = message.text.split()
+        if len(msg_parts) == 3:
+            image_url, character_name = msg_parts[1], msg_parts[2]
+            characters_collection.insert_one({
+                'image_url': image_url,
+                'character_name': character_name,
+                'rarity': assign_rarity()
+            })
+            bot.reply_to(message, "✅ Character uploaded successfully!")
+        else:
+            bot.reply_to(message, "Usage: /upload <image_url> <character_name>")
+    else:
+        bot.reply_to(message, "🚫 You don't have permission to use this command.")
+
+# Start bot polling
 bot.infinity_polling(timeout=60, long_polling_timeout=60)
