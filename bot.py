@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # Bot Token and MongoDB URI
-API_TOKEN = "7579121046:AAFkkJUHCdhioFU140VplkaoWtC7x0KyTUU"
+API_TOKEN = "7579121046:AAEc0CkNM3hjKtneFRNaU4bXIa3yueRyHFM"
 MONGO_URI = "mongodb+srv://PhiloWise:Philo@waifu.yl9tohm.mongodb.net/?retryWrites=true&w=majority&appName=Waifu"
 
 # Admin and Channel Information
@@ -39,6 +39,10 @@ MESSAGE_THRESHOLD = 5
 
 # Sudo Users
 SUDO_USERS = [BOT_OWNER_ID]
+
+# Global variables to track the current character and message count
+current_character = None
+global_message_count = 0  # Global counter for messages in all chats
 
 # Helper Functions
 def get_user_data(user_id):
@@ -200,6 +204,7 @@ def add_sudo_user(message):
 # Handle All Messages and Check for Character Guesses
 @bot.message_handler(func=lambda message: True)
 def handle_all_messages(message):
+    global current_character
     global global_message_count
     chat_id = message.chat.id
     user_id = message.from_user.id
@@ -216,6 +221,7 @@ def handle_all_messages(message):
             user = get_user_data(user_id)
             new_coins = user['coins'] + COINS_PER_GUESS
             user['correct_guesses'] += 1
+            level = get_user_level(user['correct_guesses'])
             update_user_data(user_id, {'coins': new_coins, 'correct_guesses': user['correct_guesses']})
 
             correct_guess_captions = [
@@ -227,7 +233,7 @@ def handle_all_messages(message):
                 "👏 Great job, you guessed it!",
                 "🥳 Bingo! You're amazing!"
             ]
-            bot.reply_to(message, random.choice(correct_guess_captions) + f" You earned {COINS_PER_GUESS} coins!")
+            bot.reply_to(message, random.choice(correct_guess_captions) + f" You earned {COINS_PER_GUESS} coins! 🎖️ Level {level}")
             send_character(chat_id)
 
 # Send Random Character to Chat
