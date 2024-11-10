@@ -8,7 +8,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 API_TOKEN = "7579121046:AAELIFFwb0bxuVPFtJrV1J76JNb8Z0ZUo2Q"
 BOT_OWNER_ID = 123456789  # Replace with the bot owner's Telegram ID
 CHANNEL_ID = -100123456789  # Replace with your Telegram channel ID where characters are logged
-MONGO_URI = "YOUR_MONGO_URI"
+MONGO_URI = "mongodb+srv://PhiloWise:Philo@waifu.yl9tohm.mongodb.net/?retryWrites=true&w=majority&appName=Waifu"
 BONUS_COINS = 5000
 COINS_PER_GUESS = 50
 STREAK_BONUS_COINS = 1000
