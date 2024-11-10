@@ -25,6 +25,7 @@ try:
     db = client['philo_game']
     users_collection = db['users']
     characters_collection = db['characters']
+    sudo_users_collection = db['sudo_users']
     print("✅ Connected to MongoDB successfully.")
 except errors.ServerSelectionTimeoutError as err:
     print(f"Error: Could not connect to MongoDB: {err}")
@@ -54,6 +55,12 @@ def get_user_data(user_id):
 def update_user_data(user_id, update_data):
     users_collection.update_one({'user_id': user_id}, {'$set': update_data})
 
+def is_sudo_user(user_id):
+    return sudo_users_collection.find_one({'user_id': user_id}) is not None
+
+def add_sudo_user(user_id):
+    sudo_users_collection.update_one({'user_id': user_id}, {'$set': {'user_id': user_id}}, upsert=True)
+
 def assign_rarity():
     rarity_levels = {'Common': '⭐', 'Rare': '🌟', 'Epic': '💎', 'Legendary': '✨'}
     weights = [60, 25, 10, 5]
@@ -80,6 +87,8 @@ def show_help(message):
 /profile - View your stats and game progress
 /levels - Show top players by coins
 /stats - Show bot statistics
+/upload <image_url> <character_name> - Upload a character (Sudo only)
+/addsudo <user_id> - Add a new sudo user (Owner only)
 """
     bot.reply_to(message, help_message)
 
@@ -130,10 +139,44 @@ def show_levels(message):
 def show_stats(message):
     total_users = users_collection.count_documents({})
     total_characters = characters_collection.count_documents({})
+    total_sudo_users = sudo_users_collection.count_documents({})
     bot.reply_to(
         message,
-        f"📊 Bot Stats:\n👥 Total Users: {total_users}\n🎭 Characters: {total_characters}"
+        f"📊 Bot Stats:\n👥 Total Users: {total_users}\n🎭 Characters: {total_characters}\n🔑 Sudo Users: {total_sudo_users}"
     )
+
+# Sudo Management
+@bot.message_handler(commands=['addsudo'])
+def add_sudo(message):
+    user_id = message.from_user.id
+    if user_id == BOT_OWNER_ID:
+        try:
+            new_sudo_id = int(message.text.split()[1])
+            add_sudo_user(new_sudo_id)
+            bot.reply_to(message, f"✅ User {new_sudo_id} has been added as a sudo user.")
+        except (IndexError, ValueError):
+            bot.reply_to(message, "Usage: /addsudo <user_id>")
+    else:
+        bot.reply_to(message, "🚫 Only the bot owner can add sudo users.")
+
+# Character Upload
+@bot.message_handler(commands=['upload'])
+def upload_character(message):
+    user_id = message.from_user.id
+    if user_id == BOT_OWNER_ID or is_sudo_user(user_id):
+        try:
+            msg_parts = message.text.split()
+            image_url, character_name = msg_parts[1], msg_parts[2]
+            characters_collection.insert_one({
+                'image_url': image_url,
+                'character_name': character_name,
+                'rarity': assign_rarity()
+            })
+            bot.reply_to(message, "✅ Character uploaded successfully!")
+        except IndexError:
+            bot.reply_to(message, "Usage: /upload <image_url> <character_name>")
+    else:
+        bot.reply_to(message, "🚫 You don't have permission to use this command.")
 
 # Sending and Handling Characters
 def send_character(chat_id):
@@ -143,6 +186,18 @@ def send_character(chat_id):
         rarity = assign_rarity()
         caption = f"🎉 A new {rarity} character has appeared! Guess the name to earn coins!"
         bot.send_photo(chat_id, current_character['image_url'], caption=caption)
+
+# Random Captions for Correct Guess
+def get_correct_guess_caption():
+    captions = [
+        "🎉 Awesome! You've nailed it!",
+        "🎊 Correct! Keep it up!",
+        "🔥 You're on fire! Great guess!",
+        "🌟 Spot on! You're really good at this!",
+        "👏 Brilliant! You've got the skills!",
+        "💥 That's correct! Well done!"
+    ]
+    return random.choice(captions)
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
@@ -161,27 +216,9 @@ def handle_message(message):
             user = get_user_data(user_id)
             new_coins = user['coins'] + COINS_PER_GUESS
             update_user_data(user_id, {'coins': new_coins, 'correct_guesses': user['correct_guesses'] + 1})
-            bot.reply_to(message, f"🎉 Correct! You've earned {COINS_PER_GUESS} coins.")
+            bot.reply_to(message, f"{get_correct_guess_caption()} You've earned {COINS_PER_GUESS} coins.")
             send_character(message.chat.id)  # Send a new character immediately
-
-# Admin-only upload command
-@bot.message_handler(commands=['upload'])
-def upload_character(message):
-    user_id = message.from_user.id
-    if user_id == BOT_OWNER_ID:
-        msg_parts = message.text.split()
-        if len(msg_parts) == 3:
-            image_url, character_name = msg_parts[1], msg_parts[2]
-            characters_collection.insert_one({
-                'image_url': image_url,
-                'character_name': character_name,
-                'rarity': assign_rarity()
-            })
-            bot.reply_to(message, "✅ Character uploaded successfully!")
-        else:
-            bot.reply_to(message, "Usage: /upload <image_url> <character_name>")
-    else:
-        bot.reply_to(message, "🚫 You don't have permission to use this command.")
 
 # Start bot polling
 bot.infinity_polling(timeout=60, long_polling_timeout=60)
+    
