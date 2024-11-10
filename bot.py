@@ -5,9 +5,9 @@ from datetime import datetime, timedelta
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # Configuration
-API_TOKEN = "7579121046:AAELIFFwb0bxuVPFtJrV1J76JNb8Z0ZUo2Q"
-BOT_OWNER_ID = 123456789  # Replace with the bot owner's Telegram ID
-CHANNEL_ID = -100123456789  # Replace with your Telegram channel ID where characters are logged
+API_TOKEN = "7579121046:AAFKN4ImzXSZWCUGIdofppsD9Uz0cQXmwD8"  # Replace with your actual bot token
+BOT_OWNER_ID = 7222795580  # Bot owner's Telegram ID
+CHANNEL_ID = -1002438449944  # Channel ID where characters are posted/logged
 MONGO_URI = "mongodb+srv://PhiloWise:Philo@waifu.yl9tohm.mongodb.net/?retryWrites=true&w=majority&appName=Waifu"
 BONUS_COINS = 5000
 COINS_PER_GUESS = 50
@@ -28,6 +28,7 @@ try:
     db = client['game_database']
     users_collection = db['users']
     characters_collection = db['characters']
+    sudo_users_collection = db['sudo_users']  # Collection for sudo users
     print("✅ MongoDB connected successfully.")
 except errors.ServerSelectionTimeoutError as err:
     print(f"Error: Could not connect to MongoDB: {err}")
@@ -92,6 +93,9 @@ def send_character(chat_id):
             print(f"Error sending character image: {e}")
             bot.send_message(chat_id, "❌ Unable to send character image.")
 
+def is_sudo_user(user_id):
+    return sudo_users_collection.find_one({'user_id': user_id}) is not None or user_id == BOT_OWNER_ID
+
 # Command Handlers
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -138,7 +142,8 @@ def claim_bonus(message):
 
 @bot.message_handler(commands=['upload'])
 def upload_character(message):
-    if message.from_user.id not in [BOT_OWNER_ID] + SUDO_USERS:
+    if not is_sudo_user(message.from_user.id):
+        bot.reply_to(message, "🚫 You are not authorized to use this command.")
         return
 
     parts = message.text.split()
@@ -162,6 +167,37 @@ def upload_character(message):
     characters_collection.insert_one(character)
     bot.reply_to(message, f"Character '{character_name}' uploaded successfully with {RARITY_LEVELS[rarity]} rarity!")
 
+@bot.message_handler(commands=['addsudo'])
+def add_sudo_user(message):
+    if message.from_user.id != BOT_OWNER_ID:
+        bot.reply_to(message, "🚫 Only the bot owner can add sudo users.")
+        return
+
+    parts = message.text.split()
+    if len(parts) != 2 or not parts[1].isdigit():
+        bot.reply_to(message, "Usage: /addsudo <user_id>")
+        return
+
+    new_sudo_user_id = int(parts[1])
+    sudo_users_collection.update_one({'user_id': new_sudo_user_id}, {'$set': {'user_id': new_sudo_user_id}}, upsert=True)
+    bot.reply_to(message, f"User {new_sudo_user_id} has been added as a sudo user.")
+
+@bot.message_handler(commands=['stats'])
+def show_stats(message):
+    if not is_sudo_user(message.from_user.id):
+        bot.reply_to(message, "🚫 You are not authorized to view bot stats.")
+        return
+
+    total_users = users_collection.count_documents({})
+    total_characters = characters_collection.count_documents({})
+    total_sudo_users = sudo_users_collection.count_documents({})
+
+    bot.reply_to(message, f"<b>Bot Statistics:</b>\n"
+                          f"👥 Total Users: {total_users}\n"
+                          f"🎭 Total Characters: {total_characters}\n"
+                          f"🔧 Sudo Users: {total_sudo_users}",
+                 parse_mode='HTML')
+
 @bot.message_handler(commands=['help'])
 def show_help(message):
     help_message = """
@@ -169,7 +205,9 @@ def show_help(message):
 
 🎮 <b>Gameplay:</b>
 /bonus - Claim your daily bonus
-/upload <img_url> <name> <rarity> - Upload a new character (admin only)
+/upload <img_url> <name> <rarity> - Upload a new character (Sudo users only)
+/addsudo <user_id> - Add a sudo user (Bot owner only)
+/stats - View bot statistics (Sudo users only)
 /help - Show this help message
 """
     bot.reply_to(message, help_message, parse_mode='HTML')
@@ -207,14 +245,11 @@ def handle_all_messages(message):
                 'inventory': user['inventory'] + [current_character]
             })
 
-            # Random caption for correct guess
-            correct_guess_caption = random.choice(CORRECT_GUESS_CAPTIONS)
-            bot.reply_to(message, f"{correct_guess_caption}\n\n"
-                                  f"💰 You've earned {COINS_PER_GUESS} coins!\n"
+            caption = random.choice(CORRECT_GUESS_CAPTIONS)
+            bot.reply_to(message, f"{caption}\nYou earned {COINS_PER_GUESS} coins!\n"
                                   f"🔥 Streak Bonus: {streak_bonus} coins for a {user['streak']}-guess streak!")
+            
+            send_character(chat_id)  # Send a new character after a correct guess
 
-            # Send a new character after a correct guess
-            send_character(chat_id)
-
-# Start polling the bot
+# Start polling
 bot.infinity_polling(timeout=60, long_polling_timeout=60)
