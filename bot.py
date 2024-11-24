@@ -1,9 +1,9 @@
 import os
 import random
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from pymongo import MongoClient, errors
-from telebot import TeleBot, types
+from telebot import TeleBot
 from dotenv import load_dotenv
 
 # Configure logging
@@ -21,8 +21,8 @@ load_dotenv()
 API_TOKEN = os.getenv("API_TOKEN")
 MONGO_URI = os.getenv("MONGO_URI")
 BOT_OWNER_ID = int(os.getenv("BOT_OWNER_ID", "0"))
-BONUS_COINS = int(os.getenv("BONUS_COINS", "0"))
-STREAK_BONUS_COINS = int(os.getenv("STREAK_BONUS_COINS", "0"))
+BONUS_COINS = int(os.getenv("BONUS_COINS", "10"))
+STREAK_BONUS_COINS = int(os.getenv("STREAK_BONUS_COINS", "5"))
 XP_PER_GUESS = 10
 XP_THRESHOLD = 100
 TOP_LEADERBOARD_LIMIT = int(os.getenv("TOP_LEADERBOARD_LIMIT", "10"))
@@ -44,6 +44,7 @@ except errors.ServerSelectionTimeoutError as err:
 
 # Utility Functions
 def get_user_data(user_id, first_name="", last_name=""):
+    """Fetches or creates user data."""
     try:
         return users_collection.find_one_and_update(
             {'user_id': user_id},
@@ -68,33 +69,34 @@ def get_user_data(user_id, first_name="", last_name=""):
         return None
 
 def update_user_data(user_id, update_data):
+    """Updates user data in the database."""
     try:
         users_collection.update_one({'user_id': user_id}, {'$set': update_data})
     except errors.PyMongoError as e:
         logging.error(f"Failed to update user data: {e}")
 
-def find_user_by_username(username):
+def fetch_new_character(group=None):
+    """Fetches a random character, optionally filtered by group."""
     try:
-        return users_collection.find_one({"profile_name": username})
-    except errors.PyMongoError as e:
-        logging.error(f"Error finding user by username: {e}")
-        return None
-
-def assign_rarity():
-    return random.choices(['Common', 'Rare', 'Epic', 'Legendary'], weights=[60, 25, 10, 5])[0]
-
-def fetch_new_character():
-    try:
-        characters = list(characters_collection.find())
-        return random.choice(characters) if characters else None
+        query = {}
+        if group:
+            query['group'] = group  # Assuming characters have a 'group' field
+        characters = list(characters_collection.find(query))
+        if characters:
+            return random.choice(characters)
+        else:
+            logging.info(f"No characters found for group: {group}")
+            return None
     except errors.PyMongoError as e:
         logging.error(f"Error fetching character: {e}")
         return None
 
 def calculate_level(xp):
+    """Calculates the level based on XP."""
     return (xp // XP_THRESHOLD) + 1
 
 def is_sudo_user(user_id):
+    """Checks if the user is a sudo user."""
     try:
         return user_id == BOT_OWNER_ID or sudo_users_collection.find_one({"user_id": user_id}) is not None
     except errors.PyMongoError as e:
@@ -104,6 +106,7 @@ def is_sudo_user(user_id):
 # Bot Command Handlers
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
+    """Handles the /start command."""
     try:
         user_id = message.from_user.id
         first_name = message.from_user.first_name or "Unknown"
@@ -117,8 +120,8 @@ def send_welcome(message):
         user_name = f"{first_name} {last_name}".strip()
         bot.reply_to(
             message,
-            f"🎉 Welcome to *Philo Game*, {user_name}!\n"
-            f"🎮 Use `/help` to see available commands.",
+            f"❖ Welcome to *Philo Game*, {user_name}!\n"
+            f"❖ Use `/help` to see available commands.",
             parse_mode="MarkdownV2"
         )
     except Exception as e:
@@ -126,43 +129,44 @@ def send_welcome(message):
 
 @bot.message_handler(commands=['help'])
 def show_help(message):
+    """Displays help information."""
     help_message = """
-<b>Available Commands:</b>
-/start - Welcome message and profile creation
-/bonus - Claim daily bonus coins
-/profile - View your stats and game progress
-/levels - Show top players by coins
-/stats - Show bot statistics (Owner only)
-/upload - Upload a new character (Admin and Sudo only)
-/addsudo - Add a sudo user (Owner only)
-/broadcast - Broadcast a message to all chats (Owner only)
-/gift - Gift coins to another player by username or @mention
+<b>❖ Available Commands:</b>
+❖ /start - Welcome message and profile creation
+❖ /bonus - Claim daily bonus coins
+❖ /profile - View your stats and game progress
+❖ /levels - Show top players by coins
+❖ /stats - Show bot statistics (Owner only)
+❖ /upload - Upload a new character (Admin and Sudo only)
+❖ /addsudo - Add a sudo user (Owner only)
+❖ /broadcast - Broadcast a message to all chats (Owner only)
+❖ /gift - Gift coins to another player by username or @mention
 """
     bot.reply_to(message, help_message, parse_mode='HTML')
 
 @bot.message_handler(commands=['levels'])
 def show_levels(message):
+    """Displays the leaderboard."""
     try:
         top_users = users_collection.find().sort("coins", -1).limit(TOP_LEADERBOARD_LIMIT)
-        leaderboard = "<b>🏆 Top Players by Coins 🏆</b>\n\n"
+        leaderboard = "<b>❖ 🏆 Top Players by Coins 🏆 ❖</b>\n\n"
         
         for i, user in enumerate(top_users, 1):
-            first_name = user.get('first_name', '')
-            last_name = user.get('last_name', '')
-            full_name = f"{first_name} {last_name}".strip()
+            profile_name = user.get('profile_name', 'Unknown')
             coins = user.get('coins', 0)
-            leaderboard += f"<b>{i}. {full_name}</b> - {coins} coins\n"
+            leaderboard += f"❖ <b>{i}. {profile_name}</b> - {coins} coins\n"
 
         bot.reply_to(message, leaderboard, parse_mode='HTML')
     except errors.PyMongoError as e:
         logging.error(f"Error fetching leaderboard: {e}")
-        bot.reply_to(message, "❌ Failed to fetch leaderboard. Please try again later.")
+        bot.reply_to(message, "❖ ❌ Failed to fetch leaderboard. Please try again later.")
     except Exception as e:
         logging.error(f"Unexpected error in /levels command: {e}")
-        bot.reply_to(message, "❌ An unexpected error occurred. Please try again later.")
+        bot.reply_to(message, "❖ ❌ An unexpected error occurred. Please try again later.")
 
 @bot.message_handler(commands=['profile'])
 def show_profile(message):
+    """Displays the user's profile."""
     try:
         user_id = message.from_user.id
         user = get_user_data(user_id)
@@ -174,22 +178,35 @@ def show_profile(message):
             if level != user.get('level', 1):
                 update_user_data(user_id, {'level': level})
 
+            profile_name = user.get('profile_name', 'Unknown')
+            coins = user.get('coins', 0)
+            correct_guesses = user.get('correct_guesses', 0)
+            streak = user.get('streak', 0)
+            inventory = user.get('inventory', [])
+            last_bonus = user.get('last_bonus', None)
+
+            last_bonus_text = (
+                f"{datetime.fromtimestamp(last_bonus).strftime('%Y-%m-%d %H:%M:%S')}"
+                if last_bonus else "❖ None"
+            )
+            inventory_text = ", ".join(inventory) if inventory else "❖ Empty"
+
             profile_text = (
-                f"👤 <b>Profile of {user.get('profile_name', 'Unknown')}</b>\n"
-                f"💰 <b>Coins:</b> {user.get('coins', 0)}\n"
-                f"🎯 <b>Correct Guesses:</b> {user.get('correct_guesses', 0)}\n"
-                f"🔥 <b>Streak:</b> {user.get('streak', 0)} days\n"
-                f"🌟 <b>Level:</b> {level}\n"
-                f"📈 <b>XP:</b> {xp} / {XP_THRESHOLD} for next level\n"
+                f"❖ <b>👤 Profile of {profile_name}</b>\n\n"
+                f"❖ 💰 <b>Coins:</b> {coins}\n"
+                f"❖ 🎯 <b>Correct Guesses:</b> {correct_guesses}\n"
+                f"❖ 🔥 <b>Streak:</b> {streak} days\n"
+                f"❖ 🌟 <b>Level:</b> {level}\n"
+                f"❖ 📈 <b>XP:</b> {xp} / {XP_THRESHOLD} for next level\n"
+                f"❖ 🎒 <b>Inventory:</b> {inventory_text}\n"
+                f"❖ ⏰ <b>Last Bonus Claimed:</b> {last_bonus_text}\n"
             )
             bot.reply_to(message, profile_text, parse_mode='HTML')
         else:
-            bot.reply_to(message, "❌ Could not retrieve your profile. Please try again later.")
+            bot.reply_to(message, "❖ ❌ Could not retrieve your profile. Please try again later.")
     except Exception as e:
         logging.error(f"Error in /profile command: {e}")
-        bot.reply_to(message, "❌ An error occurred while fetching your profile.")
-
-# Additional Commands...
+        bot.reply_to(message, "❖ ❌ An error occurred while fetching your profile.")
 
 # Start bot polling
 try:
