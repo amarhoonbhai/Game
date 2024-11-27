@@ -185,7 +185,7 @@ def show_help(message):
             f"📌 <b>Commands:</b>\n"
             f"• /start - Start your journey\n"
             f"• /help - Display this help message\n"
-            f"• /stats - View bot statistics\n"
+            f"• /stats - View bot statistics (Owner only)\n"
             f"• /levels - View the leaderboard\n"
             f"• /profile - View your profile\n"
             f"• /addsudo - Add a sudo user (Owner only)\n"
@@ -226,7 +226,11 @@ def show_levels(message):
 
 @bot.message_handler(commands=['stats'])
 def show_stats(message):
-    """Displays bot statistics."""
+    """Displays bot statistics (Owner only)."""
+    if message.from_user.id != BOT_OWNER_ID:
+        bot.reply_to(message, "❌ Only the bot owner can use this command.")
+        return
+
     try:
         user_count = users_collection.count_documents({})
         character_count = characters_collection.count_documents({})
@@ -375,11 +379,6 @@ def handle_message(message):
         user_id = message.from_user.id
         user_text = message.text.strip().lower()
 
-        # Check if it's time to start a new game
-        if increment_message_count(chat_id):
-            start_new_character_game(chat_id)
-            return
-
         # Check if there's an active game in the chat
         if chat_id in active_games:
             character = active_games[chat_id]
@@ -387,10 +386,20 @@ def handle_message(message):
 
             # Check if the user's input matches any word in the character's name
             if any(word in character_words for word in user_text.split()):
+                # Reward the user for a correct guess
                 reward_user(user_id, chat_id, character)
-                del active_games[chat_id]  # End the current game
+
+                # Remove the completed character
+                del active_games[chat_id]
+
+                # Immediately start a new character game
+                start_new_character_game(chat_id)
             else:
                 bot.reply_to(message, "❌ Incorrect! Try again.")
+        else:
+            # Increment message count and start a new game if threshold is reached
+            if increment_message_count(chat_id):
+                start_new_character_game(chat_id)
     except Exception as e:
         logging.error(f"Error handling message: {e}")
 
