@@ -190,6 +190,7 @@ def show_help(message):
             f"• /profile - View your profile\n"
             f"• /addsudo - Add a sudo user (Owner only)\n"
             f"• /broadcast - Broadcast a message (Sudo/Admin only)\n"
+            f"• /upload - Upload a new character\n"
             f"✨ Guess names directly in chat to earn points!"
         )
 
@@ -203,25 +204,79 @@ def show_help(message):
 
 @bot.message_handler(commands=['levels'])
 def show_levels(message):
-    """Displays the leaderboard."""
+    """Displays the leaderboard with top users and their titles."""
     try:
-        top_users = users_collection.find().sort("coins", -1).limit(10)
+        top_users = users_collection.find().sort("coins", -1).limit(10)  # Fetch top 10 users
         leaderboard = "<b>🏆 Leaderboard - Top Players 🏆</b>\n\n"
 
         for i, user in enumerate(top_users, 1):
             profile_name = user.get('profile_name', 'Unknown')
-            coins = user.get('coins', 0)
             xp = user.get('xp', 0)
             level = calculate_level(xp)
             title = get_title(level)
-            leaderboard += f"{i}. <b>{profile_name}</b>\n"
-            leaderboard += f"   🏅 Level: {level} ({title})\n"
-            leaderboard += f"   💰 Coins: {coins}\n\n"
+            leaderboard += f"{i}. <b>{profile_name}</b> - {title}\n"
 
-        bot.send_message(message.chat.id, leaderboard, parse_mode='HTML')
+        if leaderboard.strip() == "":
+            bot.send_message(message.chat.id, "❌ No users found in the leaderboard.")
+        else:
+            bot.send_message(message.chat.id, leaderboard, parse_mode='HTML')
     except Exception as e:
         logging.error(f"Error in /levels command: {e}")
         bot.reply_to(message, "❌ Failed to fetch leaderboard. Please try again later.")
+
+@bot.message_handler(commands=['stats'])
+def show_stats(message):
+    """Displays bot statistics."""
+    try:
+        user_count = users_collection.count_documents({})
+        character_count = characters_collection.count_documents({})
+        chat_count = chats_collection.count_documents({})
+
+        stats_message = (
+            f"📊 <b>Bot Statistics</b>\n"
+            f"👤 Total Users: {user_count}\n"
+            f"📚 Total Characters: {character_count}\n"
+            f"💬 Total Chats: {chat_count}"
+        )
+        bot.send_message(message.chat.id, stats_message, parse_mode='HTML')
+    except Exception as e:
+        logging.error(f"Error fetching stats: {e}")
+        bot.reply_to(message, "❌ Failed to fetch stats.")
+
+@bot.message_handler(commands=['upload'])
+def upload_character(message):
+    """Uploads a new character."""
+    try:
+        parts = message.text.split(" ", 2)
+        if len(parts) < 3:
+            bot.reply_to(message, "❌ Usage: /upload <image_url> <character_name>")
+            return
+
+        image_url = parts[1].strip()
+        character_name = parts[2].strip()
+
+        if not image_url.startswith("http"):
+            bot.reply_to(message, "❌ Invalid image URL. Please provide a valid link.")
+            return
+
+        new_character = {
+            "name": character_name,
+            "image_url": image_url,
+            "rarity": auto_assign_rarity(),
+            "created_at": datetime.utcnow()
+        }
+        characters_collection.insert_one(new_character)
+
+        bot.reply_to(
+            message,
+            f"✅ Character uploaded successfully:\n"
+            f"📸 <b>Image:</b> {image_url}\n"
+            f"👤 <b>Name:</b> {character_name}",
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        logging.error(f"Error uploading character: {e}")
+        bot.reply_to(message, "❌ Failed to upload the character. Please try again.")
 
 @bot.message_handler(commands=['profile'])
 def show_profile(message):
@@ -318,17 +373,22 @@ def handle_message(message):
     try:
         chat_id = message.chat.id
         user_id = message.from_user.id
-        user_text = message.text.strip()
+        user_text = message.text.strip().lower()
 
+        # Check if it's time to start a new game
         if increment_message_count(chat_id):
             start_new_character_game(chat_id)
             return
 
+        # Check if there's an active game in the chat
         if chat_id in active_games:
             character = active_games[chat_id]
-            if user_text.lower() == character['name'].lower():
+            character_words = character['name'].lower().split()  # Split the character's name into words
+
+            # Check if the user's input matches any word in the character's name
+            if any(word in character_words for word in user_text.split()):
                 reward_user(user_id, chat_id, character)
-                del active_games[chat_id]
+                del active_games[chat_id]  # End the current game
             else:
                 bot.reply_to(message, "❌ Incorrect! Try again.")
     except Exception as e:
