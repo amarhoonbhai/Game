@@ -41,7 +41,7 @@ app = Client("philo_guesser_bot", bot_token=BOT_TOKEN)
 # Rarity Levels with Bonuses
 rarity_levels = {
     "Common": {"emoji": "🌱", "bonus": 10},
-    "Uncommon": {"emoji": "🌟", "bonus": 20},
+    "Elite": {"emoji": "🌟", "bonus": 20},  # Replaced "Uncommon" with "Elite"
     "Rare": {"emoji": "🔮", "bonus": 30},
     "Legendary": {"emoji": "🐉", "bonus": 50},
 }
@@ -116,7 +116,7 @@ async def help_command(client, message: Message):
         "2. Guess the character's name by typing any part of it.\n"
         "3. Earn coins based on the character's rarity:\n"
         "   - 🌱 Common: 10 coins\n"
-        "   - 🌟 Uncommon: 20 coins\n"
+        "   - 🌟 Elite: 20 coins\n"
         "   - 🔮 Rare: 30 coins\n"
         "   - 🐉 Legendary: 50 coins\n\n"
         "⭐ **Commands:**\n"
@@ -215,7 +215,6 @@ async def upload_character_command(client, message: Message):
 
     characters_collection.insert_one({"image_url": image_url, "name": character_name, "rarity": rarity})
 
-    # Optionally, send the character to the logging channel
     if CHARACTER_CHANNEL_ID:
         await client.send_photo(
             CHARACTER_CHANNEL_ID,
@@ -240,12 +239,11 @@ async def bonus_command(client, message: Message):
         await message.reply_text("❌ **You have already claimed your daily bonus today. Try again tomorrow!**")
         return
 
-    # Update user's coins and streak
     users_collection.update_one(
         {"_id": user_id},
         {"$set": {"daily_bonus": True}, "$inc": {"coins": BONUS_COINS, "streak_count": 1}}
     )
-    streak_bonus = STREAK_BONUS_COINS if user["streak_count"] > 0 else 0
+    streak_bonus = STREAK_BONUS_COINS if user["streak_count"] > 1 else 0
     total_coins = user['coins'] + BONUS_COINS + streak_bonus
 
     await message.reply_text(
@@ -256,7 +254,7 @@ async def bonus_command(client, message: Message):
     )
 
 
-@app.on_message(filters.text & ~filters.command())
+@app.on_message(filters.text & ~filters.create(lambda _, __, message: message.text.startswith("/")))
 async def handle_guess(client, message: Message):
     """Handle guesses and messages."""
     user_id = message.from_user.id
@@ -267,7 +265,6 @@ async def handle_guess(client, message: Message):
     users_collection.update_one({"_id": user_id}, {"$inc": {"messages": 1}})
     messages_sent = user["messages"] + 1
 
-    # Check guess using substring matching
     character = characters_collection.find_one({"name": {"$regex": f"{message.text.strip()}", "$options": "i"}})
     if character:
         rarity = character["rarity"]
@@ -277,7 +274,6 @@ async def handle_guess(client, message: Message):
             f"✅ **Correct!** 🎉 You earned {coins_earned} 🪙!\n💰 **Total Coins:** {user['coins'] + coins_earned} 🪙."
         )
 
-        # Fetch and display the next random character
         next_character = characters_collection.aggregate([{"$sample": {"size": 1}}]).next()
         await message.reply_photo(
             next_character["image_url"],
@@ -285,7 +281,6 @@ async def handle_guess(client, message: Message):
         )
         return
 
-    # Display character after MESSAGE_THRESHOLD messages
     if messages_sent % MESSAGE_THRESHOLD == 0:
         random_character = characters_collection.aggregate([{"$sample": {"size": 1}}]).next()
         await message.reply_photo(
@@ -300,4 +295,3 @@ if __name__ == "__main__":
     idle()
     app.stop()
     print("Philo Guesser Bot stopped.")
-                                              
