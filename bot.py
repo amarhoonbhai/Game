@@ -19,6 +19,7 @@ client = MongoClient(MONGO_URI)
 db = client["anime_bot"]
 users_collection = db["users"]
 characters_collection = db["characters"]
+sudo_users_collection = db["sudo_users"]
 
 # Rarity Levels
 RARITY_LEVELS = {
@@ -54,9 +55,13 @@ def update_user_stats(user_id, coins, correct_guess=False):
         update_query["$inc"]["correct_guesses"] = 1
     users_collection.update_one({"_id": user_id}, update_query)
 
+def is_sudo_user(user_id):
+    """Check if a user is a sudo user."""
+    return bool(sudo_users_collection.find_one({"_id": user_id})) or user_id == OWNER_ID
+
 def get_level_and_tag(coins):
     """Calculate level and tag based on coins."""
-    level = coins // 10
+    level = coins // 10  # Each level requires 10 coins
     if level < 50:
         tag = "🐣 Novice Explorer"
     elif level < 200:
@@ -67,7 +72,7 @@ def get_level_and_tag(coins):
         tag = "🌟 Heroic Legend"
     elif level == 999:
         tag = "⚡ Master Champion"
-    elif level >= 1000:
+    else:  # Level 1000 and above
         tag = "🔥 Overpowered Master"
     return level, tag
 
@@ -96,7 +101,7 @@ async def send_new_character(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command."""
     user = update.effective_user
-    user_profile = get_user_profile(user.id, user.full_name)
+    get_user_profile(user.id, user.full_name)
     welcome_message = (
         f"🎮 **Welcome to Philo Guesser, {user.full_name}! 🌟**\n"
         "🎉 Test your knowledge and climb the leaderboard by guessing correctly!"
@@ -113,7 +118,8 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📊 **Your Profile**\n"
         f"👤 **Name**: {user.full_name}\n"
         f"💰 **Coins**: {coins}\n"
-        f"🎮 **Level**: {level} {tag}\n"
+        f"🎮 **Level**: {level}\n"
+        f"🏅 **Rank**: {tag}\n"
         f"✔️ **Correct Guesses**: {user_profile['correct_guesses']}\n"
         f"🎮 **Games Played**: {user_profile['games_played']}\n"
         "⭐ Keep playing to level up and earn rewards!"
@@ -136,45 +142,64 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(stats_message, parse_mode=ParseMode.MARKDOWN)
 
-async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send a character for guessing."""
-    await send_new_character(context, chat_id=update.effective_chat.id)
+async def send_help_message(update: Update):
+    """Send a list of available commands."""
+    help_message = (
+        "🛠 **Available Commands:**\n"
+        "/start - Start the bot\n"
+        "/profile - View your profile\n"
+        "/stats - View bot stats (Owner only)\n"
+        "/guess - Start a guessing game\n"
+        "/help - Show this help message\n"
+        "/addsudo [user_id] - Add a sudo user (Owner only)\n"
+        "/upload [image_url] [character_name] [rarity] - Add a new character to the database (Owner/Sudo only)"
+    )
+    await update.message.reply_text(help_message, parse_mode=ParseMode.MARKDOWN)
 
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle user messages for guessing and threshold."""
+async def add_sudo_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Add a user as a sudo user."""
     user_id = update.effective_user.id
-    chat_id = update.effective_chat.id
-
-    # Update message counter for threshold
-    if user_id not in message_counters:
-        message_counters[user_id] = 0
-    message_counters[user_id] += 1
-
-    if message_counters[user_id] >= MESSAGE_THRESHOLD:
-        # Reset counter and send new character
-        message_counters[user_id] = 0
-        await send_new_character(context, chat_id=chat_id)
+    if user_id != OWNER_ID:
+        await update.message.reply_text("❌ Only the owner can add sudo users.")
         return
 
-    # Check if the user is guessing a character
-    if "chosen_character" not in context.chat_data:
+    if len(context.args) != 1 or not context.args[0].isdigit():
+        await update.message.reply_text("⚠️ Usage: /addsudo [user_id]")
         return
 
-    chosen_character = context.chat_data["chosen_character"]
-    guess = update.message.text.strip().lower()
-    character_words = set(chosen_character["name"].lower().split())
-    guessed_words = set(guess.split())
-
-    if character_words.intersection(guessed_words):
-        update_user_stats(user_id, coins=10, correct_guess=True)
-        await update.message.reply_text(
-            f"🎉 **Correct!** The character is **{chosen_character['name']}**. 🏆 You earned 10 coins!",
-            parse_mode=ParseMode.MARKDOWN,
-        )
-        # Send a new character immediately
-        await send_new_character(context, chat_id=chat_id)
+    sudo_user_id = int(context.args[0])
+    if sudo_users_collection.find_one({"_id": sudo_user_id}):
+        await update.message.reply_text("✅ This user is already a sudo user.")
     else:
-        await update.message.reply_text("❌ **Wrong guess. Try again!** 🚨")
+        sudo_users_collection.insert_one({"_id": sudo_user_id})
+        await update.message.reply_text(f"✅ User {sudo_user_id} has been added as a sudo user.")
+
+async def upload_character(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Upload a new character to the database."""
+    user_id = update.effective_user.id
+    if not is_sudo_user(user_id):
+        await update.message.reply_text("❌ You do not have permission to add characters.")
+        return
+
+    if len(context.args) < 3:
+        await update.message.reply_text("⚠️ Usage: /upload [image_url] [character_name] [rarity]")
+        return
+
+    image_url = context.args[0]
+    character_name = " ".join(context.args[1:-1])
+    rarity = context.args[-1].capitalize()
+
+    if rarity not in RARITY_LEVELS:
+        await update.message.reply_text(f"⚠️ Invalid rarity level. Choose from: {', '.join(RARITY_LEVELS.keys())}")
+        return
+
+    # Insert character into the database
+    characters_collection.insert_one({
+        "name": character_name,
+        "image_url": image_url,
+        "rarity": rarity
+    })
+    await update.message.reply_text(f"✅ Character '{character_name}' added with rarity '{rarity}'.")
 
 # Main Function
 def main():
@@ -188,8 +213,9 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("profile", profile))
     application.add_handler(CommandHandler("stats", stats))
-    application.add_handler(CommandHandler("guess", guess))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
+    application.add_handler(CommandHandler("help", send_help_message))
+    application.add_handler(CommandHandler("addsudo", add_sudo_user))
+    application.add_handler(CommandHandler("upload", upload_character))
 
     # Start the bot
     print("🤖 Bot is running...")
