@@ -1,7 +1,2 @@
-pyrogram==2.0.106  # Telegram Bot Framework
-pyaes==1.6.1       # Required by Pyrogram for encryption
-pysocks==1.7.1     # Proxy support for Pyrogram
-tgcrypto==1.2.3    # Optional but speeds up Pyrogram significantly
-pymongo==4.6.0     # MongoDB Python Driver
-requests==2.31.0   # For handling HTTP requests (e.g., image URL validation)
-python-dotenv==1.0.0  # For reading .env configuration files
+pymongo
+python-dotenv
