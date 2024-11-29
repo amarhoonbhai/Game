@@ -2,7 +2,7 @@ import random
 import requests
 import os
 from pymongo import MongoClient
-from pymongo.errors import ConnectionError
+from pymongo.errors import ServerSelectionTimeoutError
 from pyrogram import Client, filters, idle
 from pyrogram.types import Message
 from dotenv import load_dotenv
@@ -10,19 +10,28 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# Configurations from .env
+BOT_TOKEN = os.getenv("API_TOKEN")
 MONGO_URI = os.getenv("MONGO_URI")
-OWNER_ID = int(os.getenv("OWNER_ID"))
+OWNER_ID = int(os.getenv("BOT_OWNER_ID"))
+CHARACTER_CHANNEL_ID = os.getenv("CHARACTER_CHANNEL_ID")
+BONUS_COINS = int(os.getenv("BONUS_COINS", 5000))
+STREAK_BONUS_COINS = int(os.getenv("STREAK_BONUS_COINS", 1000))
+COINS_PER_GUESS = int(os.getenv("COINS_PER_GUESS", 500))
+MESSAGE_THRESHOLD = int(os.getenv("MESSAGE_THRESHOLD", 5))
+TOP_LEADERBOARD_LIMIT = int(os.getenv("TOP_LEADERBOARD_LIMIT", 10))
 
 # MongoDB setup
 try:
-    client = MongoClient(MONGO_URI)
+    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
     db = client["philo_guesser"]
     users_collection = db["users"]
     characters_collection = db["characters"]
     sudo_users_collection = db["sudo_users"]
+    # Test the connection
+    client.server_info()
     print("✅ MongoDB connected successfully!")
-except ConnectionError as e:
+except ServerSelectionTimeoutError as e:
     print(f"❌ MongoDB connection failed: {e}")
     exit(1)
 
@@ -37,14 +46,19 @@ rarity_levels = {
     "Legendary": {"emoji": "🐉", "bonus": 50},
 }
 
-MESSAGE_THRESHOLD = 5  # Set the message threshold to 5
-
-
 # Helper Functions
 def add_user(user_id, full_name):
     """Add a user to the database if they don't already exist."""
     if not users_collection.find_one({"_id": user_id}):
-        users_collection.insert_one({"_id": user_id, "full_name": full_name, "coins": 0, "level": 1, "messages": 0})
+        users_collection.insert_one({
+            "_id": user_id,
+            "full_name": full_name,
+            "coins": 0,
+            "level": 1,
+            "messages": 0,
+            "daily_bonus": False,
+            "streak_count": 0
+        })
 
 
 def calculate_level(coins):
@@ -86,7 +100,8 @@ async def start_command(_, message: Message):
         "⭐ **Commands:**\n"
         "`/help` - View detailed instructions.\n"
         "`/levels` - See the leaderboard.\n"
-        "`/profile` - View your profile.\n\n"
+        "`/profile` - View your profile.\n"
+        "`/bonus` - Claim your daily bonus.\n\n"
         "Start guessing and become the ultimate Philo Guesser!"
     )
 
@@ -109,7 +124,8 @@ async def help_command(_, message: Message):
         "`/levels` - Check the leaderboard.\n"
         "`/profile` - View your profile with stats.\n"
         "`/upload <image_url> <character_name> <rarity>` - Add a character (Owner/Sudo Only).\n"
-        "`/addsudo <user_id>` - Add a sudo user (Owner Only).\n\n"
+        "`/addsudo <user_id>` - Add a sudo user (Owner Only).\n"
+        "`/bonus` - Claim your daily bonus coins.\n\n"
         "✨ **Tip:** Level up to unlock exclusive tags like '⚡ Elite ⚡' and '🔥 Over Power 🔥'!"
     )
 
@@ -131,22 +147,38 @@ async def profile_command(_, message: Message):
         f"💬 **Messages Sent:** {user['messages']}\n"
         f"💰 **Coins:** {user['coins']} 🪙\n"
         f"⭐ **Level:** {level} ({tag})\n"
-        f"🎯 **Coins to Next Level:** {next_level} 🪙"
+        f"🎯 **Coins to Next Level:** {next_level} 🪙\n"
+        f"🔥 **Streak Count:** {user['streak_count']}"
     )
 
 
-@app.on_message(filters.command("levels"))
-async def levels_command(_, message: Message):
-    """Handle the /levels command."""
-    users = list(users_collection.find().sort("coins", -1))
-    leaderboard = []
-    for i, user in enumerate(users[:10]):
-        badge = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else "🏅"
-        tag = get_level_tag(calculate_level(user["coins"]))
-        leaderboard.append(
-            f"{badge} {user['full_name']} - {user['coins']} 🪙 (Level {calculate_level(user['coins'])}, {tag})"
-        )
-    await message.reply_text(f"🏆 **Leaderboard:**\n\n" + "\n".join(leaderboard))
+@app.on_message(filters.command("bonus"))
+async def bonus_command(_, message: Message):
+    """Handle the /bonus command for daily coins."""
+    user_id = message.from_user.id
+    user = users_collection.find_one({"_id": user_id})
+
+    if not user:
+        await message.reply_text("❌ **You are not registered yet. Please use /start first.**")
+        return
+
+    if user["daily_bonus"]:
+        await message.reply_text("❌ **You have already claimed your daily bonus today. Try again tomorrow!**")
+        return
+
+    # Update user's coins and streak
+    users_collection.update_one(
+        {"_id": user_id},
+        {"$set": {"daily_bonus": True}, "$inc": {"coins": BONUS_COINS, "streak_count": 1}}
+    )
+    streak_bonus = STREAK_BONUS_COINS if user["streak_count"] > 1 else 0
+
+    await message.reply_text(
+        f"🎉 **Daily Bonus Claimed!**\n"
+        f"💰 **Bonus Coins:** {BONUS_COINS}\n"
+        f"🔥 **Streak Bonus:** {streak_bonus}\n"
+        f"💰 **Total Coins:** {user['coins'] + BONUS_COINS + streak_bonus} 🪙"
+    )
 
 
 @app.on_message(filters.text & ~filters.command)
@@ -164,7 +196,7 @@ async def handle_guess(_, message: Message):
     character = characters_collection.find_one({"name": {"$regex": f"{message.text.strip()}", "$options": "i"}})
     if character:
         rarity = character["rarity"]
-        coins_earned = rarity_levels[rarity]["bonus"]
+        coins_earned = rarity_levels[rarity]["bonus"] + COINS_PER_GUESS
         users_collection.update_one({"_id": user_id}, {"$inc": {"coins": coins_earned}})
         await message.reply_text(
             f"✅ **Correct!** 🎉 You earned {coins_earned} 🪙!\n💰 **Total Coins:** {user['coins'] + coins_earned} 🪙."
