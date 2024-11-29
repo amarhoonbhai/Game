@@ -2,8 +2,9 @@ import os
 import random
 from pymongo import MongoClient
 from dotenv import load_dotenv
-from telegram import Update, ParseMode, Bot
-from telegram.ext import Updater, CommandHandler, CallbackContext, MessageHandler, Filters
+from telegram import Update, Bot
+from telegram.constants import ParseMode
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
 # Load environment variables
 load_dotenv()
@@ -76,11 +77,11 @@ def assign_rarity():
     probabilities = [0.5, 0.3, 0.15, 0.05]  # Probabilities for Common, Elite, Rare, Legendary
     return random.choices(rarities, probabilities, k=1)[0]
 
-def send_new_character(context: CallbackContext, chat_id: int):
+async def send_new_character(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
     """Send a new character for guessing."""
     chosen_character = characters_collection.aggregate([{ "$sample": { "size": 1 } }]).next()
     if not chosen_character:
-        context.bot.send_message(chat_id=chat_id, text="🚨 No characters available in the database!")
+        await context.bot.send_message(chat_id=chat_id, text="🚨 No characters available in the database!")
         return
 
     context.chat_data["chosen_character"] = chosen_character
@@ -89,10 +90,10 @@ def send_new_character(context: CallbackContext, chat_id: int):
         f"📸 **Image**: {chosen_character['image_url']}\n"
         f"🌟 **Rarity**: {RARITY_LEVELS[chosen_character['rarity']]}"
     )
-    context.bot.send_message(chat_id=chat_id, text=caption, parse_mode=ParseMode.MARKDOWN)
+    await context.bot.send_message(chat_id=chat_id, text=caption, parse_mode=ParseMode.MARKDOWN)
 
 # Command Handlers
-def start(update: Update, context: CallbackContext):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command."""
     user = update.effective_user
     user_profile = get_user_profile(user.id, user.full_name)
@@ -100,9 +101,9 @@ def start(update: Update, context: CallbackContext):
         f"🎮 **Welcome to Philo Guesser, {user.full_name}! 🌟**\n"
         "🎉 Test your knowledge and climb the leaderboard by guessing correctly!"
     )
-    update.message.reply_text(welcome_message, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(welcome_message, parse_mode=ParseMode.MARKDOWN)
 
-def profile(update: Update, context: CallbackContext):
+async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /profile command."""
     user = update.effective_user
     user_profile = get_user_profile(user.id, user.full_name)
@@ -117,13 +118,13 @@ def profile(update: Update, context: CallbackContext):
         f"🎮 **Games Played**: {user_profile['games_played']}\n"
         "⭐ Keep playing to level up and earn rewards!"
     )
-    update.message.reply_text(profile_message, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(profile_message, parse_mode=ParseMode.MARKDOWN)
 
-def stats(update: Update, context: CallbackContext):
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /stats command (Owner only)."""
     user_id = update.effective_user.id
     if user_id != OWNER_ID:
-        update.message.reply_text("❌ You do not have permission to view bot stats.")
+        await update.message.reply_text("❌ You do not have permission to view bot stats.")
         return
 
     total_users = users_collection.count_documents({})
@@ -133,13 +134,13 @@ def stats(update: Update, context: CallbackContext):
         f"👥 **Total Users**: {total_users}\n"
         f"🎭 **Total Characters**: {total_characters}"
     )
-    update.message.reply_text(stats_message, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(stats_message, parse_mode=ParseMode.MARKDOWN)
 
-def guess(update: Update, context: CallbackContext):
+async def guess(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send a character for guessing."""
-    send_new_character(context, chat_id=update.effective_chat.id)
+    await send_new_character(context, chat_id=update.effective_chat.id)
 
-def message_handler(update: Update, context: CallbackContext):
+async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle user messages for guessing and threshold."""
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
@@ -152,7 +153,7 @@ def message_handler(update: Update, context: CallbackContext):
     if message_counters[user_id] >= MESSAGE_THRESHOLD:
         # Reset counter and send new character
         message_counters[user_id] = 0
-        send_new_character(context, chat_id=chat_id)
+        await send_new_character(context, chat_id=chat_id)
         return
 
     # Check if the user is guessing a character
@@ -166,14 +167,14 @@ def message_handler(update: Update, context: CallbackContext):
 
     if character_words.intersection(guessed_words):
         update_user_stats(user_id, coins=10, correct_guess=True)
-        update.message.reply_text(
+        await update.message.reply_text(
             f"🎉 **Correct!** The character is **{chosen_character['name']}**. 🏆 You earned 10 coins!",
             parse_mode=ParseMode.MARKDOWN,
         )
         # Send a new character immediately
-        send_new_character(context, chat_id=chat_id)
+        await send_new_character(context, chat_id=chat_id)
     else:
-        update.message.reply_text("❌ **Wrong guess. Try again!** 🚨")
+        await update.message.reply_text("❌ **Wrong guess. Try again!** 🚨")
 
 # Main Function
 def main():
@@ -181,20 +182,18 @@ def main():
     if not BOT_TOKEN:
         raise ValueError("BOT_TOKEN is not set. Please check your .env file.")
 
-    updater = Updater(BOT_TOKEN)
-    dispatcher = updater.dispatcher
+    application = Application.builder().token(BOT_TOKEN).build()
 
     # Command Handlers
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CommandHandler("profile", profile))
-    dispatcher.add_handler(CommandHandler("stats", stats))
-    dispatcher.add_handler(CommandHandler("guess", guess))
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, message_handler))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("profile", profile))
+    application.add_handler(CommandHandler("stats", stats))
+    application.add_handler(CommandHandler("guess", guess))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
-    # Start Polling
+    # Start the bot
     print("🤖 Bot is running...")
-    updater.start_polling()
-    updater.idle()
+    application.run_polling()
 
 if __name__ == "__main__":
     main()
