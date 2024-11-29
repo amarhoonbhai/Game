@@ -14,12 +14,12 @@ load_dotenv()
 BOT_TOKEN = os.getenv("API_TOKEN")
 MONGO_URI = os.getenv("MONGO_URI")
 OWNER_ID = int(os.getenv("BOT_OWNER_ID"))
-CHARACTER_CHANNEL_ID = os.getenv("CHARACTER_CHANNEL_ID")
-BONUS_COINS = int(os.getenv("BONUS_COINS", 5000))
-STREAK_BONUS_COINS = int(os.getenv("STREAK_BONUS_COINS", 1000))
-COINS_PER_GUESS = int(os.getenv("COINS_PER_GUESS", 500))
-MESSAGE_THRESHOLD = int(os.getenv("MESSAGE_THRESHOLD", 5))
-TOP_LEADERBOARD_LIMIT = int(os.getenv("TOP_LEADERBOARD_LIMIT", 10))
+CHARACTER_CHANNEL_ID = int(os.getenv("CHARACTER_CHANNEL_ID"))
+BONUS_COINS = int(os.getenv("BONUS_COINS", "5000"))
+STREAK_BONUS_COINS = int(os.getenv("STREAK_BONUS_COINS", "1000"))
+COINS_PER_GUESS = int(os.getenv("COINS_PER_GUESS", "500"))
+MESSAGE_THRESHOLD = int(os.getenv("MESSAGE_THRESHOLD", "5"))
+TOP_LEADERBOARD_LIMIT = int(os.getenv("TOP_LEADERBOARD_LIMIT", "10"))
 
 # MongoDB setup
 try:
@@ -88,7 +88,7 @@ def is_owner_or_sudo(user_id):
 
 
 @app.on_message(filters.command("start"))
-async def start_command(_, message: Message):
+async def start_command(client, message: Message):
     """Handle the /start command."""
     user_full_name = message.from_user.full_name
     add_user(message.from_user.id, user_full_name)
@@ -107,7 +107,7 @@ async def start_command(_, message: Message):
 
 
 @app.on_message(filters.command("help"))
-async def help_command(_, message: Message):
+async def help_command(client, message: Message):
     """Handle the /help command."""
     await message.reply_text(
         "📚 **Philo Guesser Help:**\n\n"
@@ -131,7 +131,7 @@ async def help_command(_, message: Message):
 
 
 @app.on_message(filters.command("profile"))
-async def profile_command(_, message: Message):
+async def profile_command(client, message: Message):
     """Handle the /profile command."""
     user_id = message.from_user.id
     user_full_name = message.from_user.full_name
@@ -152,17 +152,91 @@ async def profile_command(_, message: Message):
     )
 
 
-@app.on_message(filters.command("bonus"))
-async def bonus_command(_, message: Message):
-    """Handle the /bonus command for daily coins."""
-    user_id = message.from_user.id
-    user = users_collection.find_one({"_id": user_id})
+@app.on_message(filters.command("levels"))
+async def levels_command(client, message: Message):
+    """Handle the /levels command."""
+    users = list(users_collection.find().sort("coins", -1))
+    leaderboard = []
+    for i, user in enumerate(users[:TOP_LEADERBOARD_LIMIT]):
+        badge = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else "🏅"
+        tag = get_level_tag(calculate_level(user["coins"]))
+        leaderboard.append(
+            f"{badge} {user['full_name']} - {user['coins']} 🪙 (Level {calculate_level(user['coins'])}, {tag})"
+        )
+    await message.reply_text(f"🏆 **Leaderboard:**\n\n" + "\n".join(leaderboard))
 
-    if not user:
-        await message.reply_text("❌ **You are not registered yet. Please use /start first.**")
+
+@app.on_message(filters.command("addsudo") & filters.user(OWNER_ID))
+async def add_sudo_command(client, message: Message):
+    """Handle the /addsudo command."""
+    if len(message.command) < 2:
+        await message.reply_text("❗ **Usage:** /addsudo <user_id>")
         return
 
-    if user["daily_bonus"]:
+    try:
+        sudo_id = int(message.command[1])
+        if not sudo_users_collection.find_one({"_id": sudo_id}):
+            sudo_users_collection.insert_one({"_id": sudo_id})
+            await message.reply_text(f"✅ **User with ID `{sudo_id}` added as sudo user.**")
+        else:
+            await message.reply_text(f"ℹ️ **User with ID `{sudo_id}` is already a sudo user.**")
+    except ValueError:
+        await message.reply_text("❌ **Invalid user ID. Use a numeric value.**")
+
+
+@app.on_message(filters.command("upload"))
+async def upload_character_command(client, message: Message):
+    """Handle the /upload command."""
+    if not is_owner_or_sudo(message.from_user.id):
+        await message.reply_text("❌ **You do not have permission to use this command.**")
+        return
+
+    if len(message.command) < 3:
+        await message.reply_text("❗ **Usage:** /upload <image_url> <character_name> <rarity>")
+        return
+
+    args = message.text.split(maxsplit=2)
+    image_url = args[1]
+    details = args[2].split(maxsplit=1)
+    character_name = details[0]
+    rarity = details[1].capitalize() if len(details) > 1 else random.choice(list(rarity_levels.keys()))
+
+    if rarity not in rarity_levels:
+        await message.reply_text(f"❌ Invalid rarity! Use: {', '.join(rarity_levels.keys())}")
+        return
+
+    try:
+        response = requests.get(image_url)
+        if response.status_code != 200:
+            raise Exception("Invalid image URL")
+    except Exception:
+        await message.reply_text("❌ **Invalid image URL. Please provide a valid link.**")
+        return
+
+    characters_collection.insert_one({"image_url": image_url, "name": character_name, "rarity": rarity})
+
+    # Optionally, send the character to the logging channel
+    if CHARACTER_CHANNEL_ID:
+        await client.send_photo(
+            CHARACTER_CHANNEL_ID,
+            photo=image_url,
+            caption=f"New character added:\nName: {character_name}\nRarity: {rarity_levels[rarity]['emoji']} {rarity}"
+        )
+
+    await message.reply_text(
+        f"✅ **Character `{character_name}` added with rarity `{rarity_levels[rarity]['emoji']} {rarity}`!**"
+    )
+
+
+@app.on_message(filters.command("bonus"))
+async def bonus_command(client, message: Message):
+    """Handle the /bonus command for daily coins."""
+    user_id = message.from_user.id
+    user_full_name = message.from_user.full_name
+    add_user(user_id, user_full_name)
+    user = users_collection.find_one({"_id": user_id})
+
+    if user.get("daily_bonus", False):
         await message.reply_text("❌ **You have already claimed your daily bonus today. Try again tomorrow!**")
         return
 
@@ -171,18 +245,19 @@ async def bonus_command(_, message: Message):
         {"_id": user_id},
         {"$set": {"daily_bonus": True}, "$inc": {"coins": BONUS_COINS, "streak_count": 1}}
     )
-    streak_bonus = STREAK_BONUS_COINS if user["streak_count"] > 1 else 0
+    streak_bonus = STREAK_BONUS_COINS if user["streak_count"] > 0 else 0
+    total_coins = user['coins'] + BONUS_COINS + streak_bonus
 
     await message.reply_text(
         f"🎉 **Daily Bonus Claimed!**\n"
         f"💰 **Bonus Coins:** {BONUS_COINS}\n"
         f"🔥 **Streak Bonus:** {streak_bonus}\n"
-        f"💰 **Total Coins:** {user['coins'] + BONUS_COINS + streak_bonus} 🪙"
+        f"💰 **Total Coins:** {total_coins} 🪙"
     )
 
 
-@app.on_message(filters.text & ~filters.command)
-async def handle_guess(_, message: Message):
+@app.on_message(filters.text & ~filters.command())
+async def handle_guess(client, message: Message):
     """Handle guesses and messages."""
     user_id = message.from_user.id
     user_full_name = message.from_user.full_name
@@ -225,3 +300,4 @@ if __name__ == "__main__":
     idle()
     app.stop()
     print("Philo Guesser Bot stopped.")
+                                              
