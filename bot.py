@@ -76,12 +76,6 @@ def get_level_and_tag(coins):
         tag = "🔥 Overpowered Master"
     return level, tag
 
-def assign_rarity():
-    """Randomly assign a rarity based on probabilities."""
-    rarities = list(RARITY_LEVELS.keys())
-    probabilities = [0.5, 0.3, 0.15, 0.05]  # Probabilities for Common, Elite, Rare, Legendary
-    return random.choices(rarities, probabilities, k=1)[0]
-
 async def send_new_character(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
     """Send a new character for guessing."""
     chosen_character = characters_collection.aggregate([{ "$sample": { "size": 1 } }]).next()
@@ -141,6 +135,44 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🎭 **Total Characters**: {total_characters}"
     )
     await update.message.reply_text(stats_message, parse_mode=ParseMode.MARKDOWN)
+
+async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle user messages for guessing and threshold."""
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+
+    # Initialize or update message counter for the user
+    if user_id not in message_counters:
+        message_counters[user_id] = 0
+    message_counters[user_id] += 1
+
+    # Check if the user has reached the message threshold
+    if message_counters[user_id] >= MESSAGE_THRESHOLD:
+        # Reset counter and send a new character
+        message_counters[user_id] = 0
+        await send_new_character(context, chat_id=chat_id)
+        return
+
+    # If a character is already chosen, check for a guess
+    if "chosen_character" not in context.chat_data:
+        return
+
+    chosen_character = context.chat_data["chosen_character"]
+    guess = update.message.text.strip().lower()
+    character_words = set(chosen_character["name"].lower().split())
+    guessed_words = set(guess.split())
+
+    # Check if the guess is correct
+    if character_words.intersection(guessed_words):
+        update_user_stats(user_id, coins=100, correct_guess=True)  # Reward 100 coins
+        await update.message.reply_text(
+            f"🎉 **Correct!** The character is **{chosen_character['name']}**. 🏆 You earned 100 coins!",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        # Immediately send a new character after a correct guess
+        await send_new_character(context, chat_id=chat_id)
+    else:
+        await update.message.reply_text("❌ **Wrong guess. Try again!** 🚨")
 
 async def send_help_message(update: Update):
     """Send a list of available commands."""
@@ -216,6 +248,7 @@ def main():
     application.add_handler(CommandHandler("help", send_help_message))
     application.add_handler(CommandHandler("addsudo", add_sudo_user))
     application.add_handler(CommandHandler("upload", upload_character))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
     # Start the bot
     print("🤖 Bot is running...")
