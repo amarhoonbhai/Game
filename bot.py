@@ -1,297 +1,292 @@
-import random
-import requests
 import os
-from pymongo import MongoClient
-from pymongo.errors import ServerSelectionTimeoutError
-from pyrogram import Client, filters, idle
-from pyrogram.types import Message
+import random
+import logging
+import time
+from datetime import datetime, timedelta
+from pymongo import MongoClient, errors
+from telebot import TeleBot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from dotenv import load_dotenv
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler("bot.log"),
+        logging.StreamHandler()
+    ]
+)
 
 # Load environment variables
 load_dotenv()
-
-# Configurations from .env
-BOT_TOKEN = os.getenv("API_TOKEN")
+API_TOKEN = os.getenv("API_TOKEN")
 MONGO_URI = os.getenv("MONGO_URI")
-OWNER_ID = int(os.getenv("BOT_OWNER_ID"))
-CHARACTER_CHANNEL_ID = int(os.getenv("CHARACTER_CHANNEL_ID"))
-BONUS_COINS = int(os.getenv("BONUS_COINS", "5000"))
-STREAK_BONUS_COINS = int(os.getenv("STREAK_BONUS_COINS", "1000"))
-COINS_PER_GUESS = int(os.getenv("COINS_PER_GUESS", "500"))
-MESSAGE_THRESHOLD = int(os.getenv("MESSAGE_THRESHOLD", "5"))
-TOP_LEADERBOARD_LIMIT = int(os.getenv("TOP_LEADERBOARD_LIMIT", "10"))
+BOT_OWNER_ID = int(os.getenv("BOT_OWNER_ID", "0"))
+RARITY_LEVELS = ["Common", "Rare", "Epic", "Legendary"]
+RARITY_POINTS = {"Common": 10, "Rare": 25, "Epic": 50, "Legendary": 100}
 
-# MongoDB setup
+# Validate environment variables
+if not API_TOKEN or not MONGO_URI:
+    logging.error("❌ Missing required environment variables. Please check .env file.")
+    exit()
+
+# Initialize bot and MongoDB
+bot = TeleBot(API_TOKEN)
 try:
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-    db = client["philo_guesser"]
-    users_collection = db["users"]
-    characters_collection = db["characters"]
-    sudo_users_collection = db["sudo_users"]
-    # Test the connection
-    client.server_info()
-    print("✅ MongoDB connected successfully!")
-except ServerSelectionTimeoutError as e:
-    print(f"❌ MongoDB connection failed: {e}")
-    exit(1)
+    db = client['philo_game']
+    users_collection = db['users']
+    characters_collection = db['characters']
+    sudo_users_collection = db['sudo_users']
+    message_counts_collection = db['message_counts']
+    chats_collection = db['chats']
+    active_games = {}  # Tracks active games per chat
+    logging.info("✅ Connected to MongoDB successfully.")
+except errors.ServerSelectionTimeoutError as err:
+    logging.error(f"❌ Could not connect to MongoDB: {err}")
+    exit()
 
-# Bot setup
-app = Client("philo_guesser_bot", bot_token=BOT_TOKEN)
+# Utility Functions
+def calculate_level(xp):
+    """Calculates the level based on XP."""
+    max_level = 1000
+    level = (xp // 100) + 1
+    return min(level, max_level)
 
-# Rarity Levels with Bonuses
-rarity_levels = {
-    "Common": {"emoji": "🌱", "bonus": 10},
-    "Elite": {"emoji": "🌟", "bonus": 20},  # Replaced "Uncommon" with "Elite"
-    "Rare": {"emoji": "🔮", "bonus": 30},
-    "Legendary": {"emoji": "🐉", "bonus": 50},
-}
-
-# Helper Functions
-def add_user(user_id, full_name):
-    """Add a user to the database if they don't already exist."""
-    if not users_collection.find_one({"_id": user_id}):
-        users_collection.insert_one({
-            "_id": user_id,
-            "full_name": full_name,
-            "coins": 0,
-            "level": 1,
-            "messages": 0,
-            "daily_bonus": False,
-            "streak_count": 0
-        })
-
-
-def calculate_level(coins):
-    """Calculate user level based on coins."""
-    return coins // 100 + 1
-
-
-def get_level_tag(level):
-    """Get a tag for the user's level."""
-    if level >= 1000:
-        return "🔥 Over Power 🔥"
-    elif 500 <= level < 1000:
-        return "⚡ Elite ⚡"
-    elif 100 <= level < 500:
-        return "💎 Pro 💎"
-    elif 50 <= level < 100:
-        return "🌟 Rising Star 🌟"
-    elif 10 <= level < 50:
-        return "🌿 Beginner 🌿"
+def get_title(level):
+    """Assigns a title based on the level."""
+    if level == 1000:
+        return "Overpowered"
+    elif level <= 3:
+        return "Novice Guesser"
+    elif level <= 6:
+        return "Intermediate Guesser"
+    elif level <= 9:
+        return "Expert Guesser"
     else:
-        return "🌱 Newbie 🌱"
+        return "Master Guesser"
 
-
-def is_owner_or_sudo(user_id):
-    """Check if the user is the owner or a sudo user."""
-    return user_id == OWNER_ID or sudo_users_collection.find_one({"_id": user_id}) is not None
-
-
-@app.on_message(filters.command("start"))
-async def start_command(client, message: Message):
-    """Handle the /start command."""
-    user_full_name = message.from_user.full_name
-    add_user(message.from_user.id, user_full_name)
-    await message.reply_text(
-        f"👋 **Welcome to Philo Guesser, {user_full_name}!**\n\n"
-        "🎮 **How to Play:**\n"
-        "- Guess anime characters by typing any part of their name.\n"
-        "- Earn coins based on the character's rarity.\n\n"
-        "⭐ **Commands:**\n"
-        "`/help` - View detailed instructions.\n"
-        "`/levels` - See the leaderboard.\n"
-        "`/profile` - View your profile.\n"
-        "`/bonus` - Claim your daily bonus.\n\n"
-        "Start guessing and become the ultimate Philo Guesser!"
-    )
-
-
-@app.on_message(filters.command("help"))
-async def help_command(client, message: Message):
-    """Handle the /help command."""
-    await message.reply_text(
-        "📚 **Philo Guesser Help:**\n\n"
-        "🎮 **How to Play:**\n"
-        "1. A random character will appear every 5 messages or after a correct guess.\n"
-        "2. Guess the character's name by typing any part of it.\n"
-        "3. Earn coins based on the character's rarity:\n"
-        "   - 🌱 Common: 10 coins\n"
-        "   - 🌟 Elite: 20 coins\n"
-        "   - 🔮 Rare: 30 coins\n"
-        "   - 🐉 Legendary: 50 coins\n\n"
-        "⭐ **Commands:**\n"
-        "`/start` - Start the bot and see the welcome message.\n"
-        "`/levels` - Check the leaderboard.\n"
-        "`/profile` - View your profile with stats.\n"
-        "`/upload <image_url> <character_name> <rarity>` - Add a character (Owner/Sudo Only).\n"
-        "`/addsudo <user_id>` - Add a sudo user (Owner Only).\n"
-        "`/bonus` - Claim your daily bonus coins.\n\n"
-        "✨ **Tip:** Level up to unlock exclusive tags like '⚡ Elite ⚡' and '🔥 Over Power 🔥'!"
-    )
-
-
-@app.on_message(filters.command("profile"))
-async def profile_command(client, message: Message):
-    """Handle the /profile command."""
-    user_id = message.from_user.id
-    user_full_name = message.from_user.full_name
-    add_user(user_id, user_full_name)
-
-    user = users_collection.find_one({"_id": user_id})
-    level = calculate_level(user["coins"])
-    tag = get_level_tag(level)
-    next_level = (level * 100) - user["coins"]
-
-    await message.reply_text(
-        f"👤 **Profile for {user_full_name}:**\n\n"
-        f"💬 **Messages Sent:** {user['messages']}\n"
-        f"💰 **Coins:** {user['coins']} 🪙\n"
-        f"⭐ **Level:** {level} ({tag})\n"
-        f"🎯 **Coins to Next Level:** {next_level} 🪙\n"
-        f"🔥 **Streak Count:** {user['streak_count']}"
-    )
-
-
-@app.on_message(filters.command("levels"))
-async def levels_command(client, message: Message):
-    """Handle the /levels command."""
-    users = list(users_collection.find().sort("coins", -1))
-    leaderboard = []
-    for i, user in enumerate(users[:TOP_LEADERBOARD_LIMIT]):
-        badge = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else "🏅"
-        tag = get_level_tag(calculate_level(user["coins"]))
-        leaderboard.append(
-            f"{badge} {user['full_name']} - {user['coins']} 🪙 (Level {calculate_level(user['coins'])}, {tag})"
-        )
-    await message.reply_text(f"🏆 **Leaderboard:**\n\n" + "\n".join(leaderboard))
-
-
-@app.on_message(filters.command("addsudo") & filters.user(OWNER_ID))
-async def add_sudo_command(client, message: Message):
-    """Handle the /addsudo command."""
-    if len(message.command) < 2:
-        await message.reply_text("❗ **Usage:** /addsudo <user_id>")
-        return
-
+def is_sudo_user(user_id):
+    """Checks if the user is a sudo user."""
     try:
-        sudo_id = int(message.command[1])
-        if not sudo_users_collection.find_one({"_id": sudo_id}):
-            sudo_users_collection.insert_one({"_id": sudo_id})
-            await message.reply_text(f"✅ **User with ID `{sudo_id}` added as sudo user.**")
+        return user_id == BOT_OWNER_ID or sudo_users_collection.find_one({"user_id": user_id}) is not None
+    except errors.PyMongoError as e:
+        logging.error(f"Error checking sudo user: {e}")
+        return False
+
+def auto_assign_rarity():
+    """Automatically assigns a rarity level."""
+    probabilities = [0.6, 0.25, 0.1, 0.05]  # Common, Rare, Epic, Legendary
+    return random.choices(RARITY_LEVELS, probabilities)[0]
+
+def increment_message_count(chat_id):
+    """Increments the message count for a chat and checks the threshold."""
+    try:
+        result = message_counts_collection.find_one_and_update(
+            {'chat_id': chat_id},
+            {'$inc': {'message_count': 1}},
+            upsert=True,
+            return_document=True
+        )
+        if result and result.get('message_count', 0) >= 5:
+            message_counts_collection.update_one({'chat_id': chat_id}, {'$set': {'message_count': 0}})
+            return True
+        return False
+    except Exception as e:
+        logging.error(f"Error incrementing message count: {e}")
+        return False
+
+def start_new_character_game(chat_id):
+    """Starts a new game with a random character."""
+    try:
+        character = characters_collection.aggregate([{'$sample': {'size': 1}}]).next()
+        active_games[chat_id] = character
+        caption = (
+            f"🎉 A new character appears! 🎉\n\n"
+            f"👤 <b>Name:</b> ???\n"
+            f"✨ <b>Rarity:</b> {character['rarity']}\n"
+            f"📸 Guess the character's name!"
+        )
+        bot.send_photo(chat_id, character['image_url'], caption=caption, parse_mode='HTML')
+    except Exception as e:
+        logging.error(f"Error starting new character game: {e}")
+
+def reward_user(user_id, chat_id, character):
+    """Rewards the user for guessing the character's name and starts a new game."""
+    try:
+        user = users_collection.find_one({'user_id': user_id})
+        if not user:
+            return
+
+        points = RARITY_POINTS.get(character['rarity'], 0)
+        last_played = user.get('last_played')
+        streak = user.get('streak', 0)
+
+        if last_played and (datetime.utcnow() - last_played).days <= 1:
+            streak += 1
         else:
-            await message.reply_text(f"ℹ️ **User with ID `{sudo_id}` is already a sudo user.**")
-    except ValueError:
-        await message.reply_text("❌ **Invalid user ID. Use a numeric value.**")
+            streak = 1
 
+        users_collection.update_one(
+            {'user_id': user_id},
+            {
+                '$inc': {'coins': points, 'correct_guesses': 1, 'xp': points},
+                '$set': {'last_played': datetime.utcnow(), 'streak': streak}
+            }
+        )
 
-@app.on_message(filters.command("upload"))
-async def upload_character_command(client, message: Message):
-    """Handle the /upload command."""
-    if not is_owner_or_sudo(message.from_user.id):
-        await message.reply_text("❌ **You do not have permission to use this command.**")
-        return
+        bot.send_message(
+            chat_id,
+            f"🎉 <b>Correct!</b> The character was <b>{character['name']}</b>.\n"
+            f"✨ You've earned <b>{points} coins</b>!\n"
+            f"🔥 Current Streak: <b>{streak} days</b>\n"
+            f"Rarity: {character['rarity']}",
+            parse_mode='HTML'
+        )
 
-    if len(message.command) < 3:
-        await message.reply_text("❗ **Usage:** /upload <image_url> <character_name> <rarity>")
-        return
+        start_new_character_game(chat_id)
 
-    args = message.text.split(maxsplit=2)
-    image_url = args[1]
-    details = args[2].split(maxsplit=1)
-    character_name = details[0]
-    rarity = details[1].capitalize() if len(details) > 1 else random.choice(list(rarity_levels.keys()))
+    except Exception as e:
+        logging.error(f"Error rewarding user: {e}")
 
-    if rarity not in rarity_levels:
-        await message.reply_text(f"❌ Invalid rarity! Use: {', '.join(rarity_levels.keys())}")
-        return
+def calculate_bonus(streak):
+    """Calculates bonus coins based on the current streak."""
+    return 10 + (streak * 5)
 
+# Command Handlers
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    """Handles the /start command and welcomes the user."""
     try:
-        response = requests.get(image_url)
-        if response.status_code != 200:
-            raise Exception("Invalid image URL")
-    except Exception:
-        await message.reply_text("❌ **Invalid image URL. Please provide a valid link.**")
-        return
+        user_id = message.from_user.id
+        first_name = message.from_user.first_name or "Unknown"
+        chat_id = message.chat.id
 
-    characters_collection.insert_one({"image_url": image_url, "name": character_name, "rarity": rarity})
-
-    if CHARACTER_CHANNEL_ID:
-        await client.send_photo(
-            CHARACTER_CHANNEL_ID,
-            photo=image_url,
-            caption=f"New character added:\nName: {character_name}\nRarity: {rarity_levels[rarity]['emoji']} {rarity}"
+        users_collection.find_one_and_update(
+            {'user_id': user_id},
+            {'$setOnInsert': {
+                'user_id': user_id,
+                'first_name': first_name,
+                'coins': 0,
+                'correct_guesses': 0,
+                'xp': 0,
+                'level': 1,
+                'streak': 0,
+                'last_bonus': None,
+                'joined_at': datetime.utcnow()
+            }},
+            upsert=True
         )
 
-    await message.reply_text(
-        f"✅ **Character `{character_name}` added with rarity `{rarity_levels[rarity]['emoji']} {rarity}`!**"
-    )
-
-
-@app.on_message(filters.command("bonus"))
-async def bonus_command(client, message: Message):
-    """Handle the /bonus command for daily coins."""
-    user_id = message.from_user.id
-    user_full_name = message.from_user.full_name
-    add_user(user_id, user_full_name)
-    user = users_collection.find_one({"_id": user_id})
-
-    if user.get("daily_bonus", False):
-        await message.reply_text("❌ **You have already claimed your daily bonus today. Try again tomorrow!**")
-        return
-
-    users_collection.update_one(
-        {"_id": user_id},
-        {"$set": {"daily_bonus": True}, "$inc": {"coins": BONUS_COINS, "streak_count": 1}}
-    )
-    streak_bonus = STREAK_BONUS_COINS if user["streak_count"] > 1 else 0
-    total_coins = user['coins'] + BONUS_COINS + streak_bonus
-
-    await message.reply_text(
-        f"🎉 **Daily Bonus Claimed!**\n"
-        f"💰 **Bonus Coins:** {BONUS_COINS}\n"
-        f"🔥 **Streak Bonus:** {streak_bonus}\n"
-        f"💰 **Total Coins:** {total_coins} 🪙"
-    )
-
-
-@app.on_message(filters.text & ~filters.create(lambda _, __, message: message.text.startswith("/")))
-async def handle_guess(client, message: Message):
-    """Handle guesses and messages."""
-    user_id = message.from_user.id
-    user_full_name = message.from_user.full_name
-    add_user(user_id, user_full_name)
-
-    user = users_collection.find_one({"_id": user_id})
-    users_collection.update_one({"_id": user_id}, {"$inc": {"messages": 1}})
-    messages_sent = user["messages"] + 1
-
-    character = characters_collection.find_one({"name": {"$regex": f"{message.text.strip()}", "$options": "i"}})
-    if character:
-        rarity = character["rarity"]
-        coins_earned = rarity_levels[rarity]["bonus"] + COINS_PER_GUESS
-        users_collection.update_one({"_id": user_id}, {"$inc": {"coins": coins_earned}})
-        await message.reply_text(
-            f"✅ **Correct!** 🎉 You earned {coins_earned} 🪙!\n💰 **Total Coins:** {user['coins'] + coins_earned} 🪙."
+        welcome_message = (
+            f"🎉 <b>Welcome to Philo Guesser, {first_name}!</b> 🎉\n\n"
+            f"🕵️‍♂️ <b>Your Mission:</b> Guess the names of philosophers and famous personalities.\n\n"
+            f"✨ <b>How to Play:</b>\n"
+            f"1️⃣ Characters will appear in the chat with a hint and an image.\n"
+            f"2️⃣ Type their name to guess — no commands needed!\n"
+            f"3️⃣ Earn points based on the character's rarity.\n\n"
+            f"🏆 <b>Rarities & Points:</b>\n"
+            f"• Common: 10 points\n"
+            f"• Rare: 25 points\n"
+            f"• Epic: 50 points\n"
+            f"• Legendary: 100 points\n\n"
+            f"Use <b>/help</b> to see all available commands. Good luck!"
         )
 
-        next_character = characters_collection.aggregate([{"$sample": {"size": 1}}]).next()
-        await message.reply_photo(
-            next_character["image_url"],
-            caption=f"🧩 **Guess the next character!**\n🎲 **Rarity:** {rarity_levels[next_character['rarity']]['emoji']} {next_character['rarity']}"
+        bot.send_message(chat_id, welcome_message, parse_mode='HTML')
+    except Exception as e:
+        logging.error(f"Error in /start command: {e}")
+        bot.reply_to(message, "❌ An error occurred while processing your request.")
+
+@bot.message_handler(commands=['help'])
+def show_help(message):
+    """Displays help information with a developer inline button."""
+    try:
+        help_message = (
+            f"🛠️ <b>Philo Guesser Help Menu</b> 🛠️\n\n"
+            f"📌 <b>Commands:</b>\n"
+            f"• /start - Start your journey\n"
+            f"• /help - Display this help message\n"
+            f"• /levels - View the leaderboard\n"
+            f"• /profile - View your profile\n"
+            f"• /bonus - Claim your daily bonus\n"
+            f"✨ Guess names directly in chat to earn points!"
         )
-        return
 
-    if messages_sent % MESSAGE_THRESHOLD == 0:
-        random_character = characters_collection.aggregate([{"$sample": {"size": 1}}]).next()
-        await message.reply_photo(
-            random_character["image_url"],
-            caption=f"🧩 **Can you guess who this is?**\n🎲 **Rarity:** {rarity_levels[random_character['rarity']]['emoji']} {random_character['rarity']}"
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/techpiro"))
+
+        bot.send_message(message.chat.id, help_message, parse_mode='HTML', reply_markup=markup)
+    except Exception as e:
+        logging.error(f"Error in /help command: {e}")
+        bot.reply_to(message, "❌ An error occurred while displaying the help menu.")
+
+@bot.message_handler(commands=['bonus'])
+def claim_bonus(message):
+    """Allows users to claim a daily bonus."""
+    try:
+        user = users_collection.find_one({'user_id': message.from_user.id})
+        if not user:
+            bot.reply_to(message, "❌ You must use /start first!")
+            return
+        
+        now = datetime.utcnow()
+        last_bonus = user.get('last_bonus')
+
+        if last_bonus and now - last_bonus < timedelta(hours=24):
+            bot.reply_to(message, "⏳ You have already claimed your bonus today. Try again later!")
+            return
+
+        bonus = 50  # Fixed bonus amount
+        users_collection.update_one(
+            {'user_id': user['user_id']},
+            {'$inc': {'coins': bonus}, '$set': {'last_bonus': now}}
         )
 
+        bot.reply_to(message, f"🎉 You've claimed your daily bonus of {bonus} coins!")
+    except Exception as e:
+        logging.error(f"Error in /bonus command: {e}")
+        bot.reply_to(message, "❌ Could not process your bonus.")
 
-if __name__ == "__main__":
-    print("Starting Philo Guesser Bot...")
-    app.start()
-    idle()
-    app.stop()
-    print("Philo Guesser Bot stopped.")
+@bot.message_handler(commands=['levels'])
+def show_leaderboard(message):
+    """Displays the leaderboard of top users."""
+    try:
+        top_users = users_collection.find().sort("coins", -1).limit(10)
+        leaderboard = "\n".join(
+            [f"{i+1}. {user['first_name']} - {user['coins']} coins" for i, user in enumerate(top_users)]
+        )
+        bot.send_message(message.chat.id, f"🏆 <b>Leaderboard</b> 🏆\n\n{leaderboard}", parse_mode='HTML')
+    except Exception as e:
+        logging.error(f"Error in /levels command: {e}")
+        bot.reply_to(message, "❌ Could not retrieve leaderboard.")
+
+@bot.message_handler(func=lambda message: not message.text.startswith('/'))
+def handle_message(message):
+    """Handles guessing and character appearance logic."""
+    try:
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+        user_text = message.text.strip().lower()
+
+        if chat_id in active_games:
+            character = active_games[chat_id]
+            if user_text == character['name'].lower():
+                reward_user(user_id, chat_id, character)
+                del active_games[chat_id]
+            else:
+                bot.reply_to(message, "❌ Incorrect! Try again.")
+        else:
+            if increment_message_count(chat_id):
+                start_new_character_game(chat_id)
+    except Exception as e:
+        logging.error(f"Error handling message: {e}")
+
+# Main polling loop with retries
+while True:
+    try:
+        bot.infinity_polling(timeout=60, long_polling_timeout=60)
+    except Exception as e:
+        logging.error(f"Error during bot polling: {e}")
+        time.sleep(5)  # Wait before retrying
