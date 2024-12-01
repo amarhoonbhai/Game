@@ -196,11 +196,6 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
     # Increment user's message count
     message_count[user_id] = message_count.get(user_id, 0) + 1
 
-    # Notify user of remaining messages until character appears
-    remaining_messages = 5 - (message_count[user_id] % 5)
-    if remaining_messages != 5:  # Notify only if not a character appearance
-        await update.message.reply_text(f"◈ 💬 Keep chatting! {remaining_messages} message(s) left for the next character.")
-
     # Check if the user guessed correctly
     guess = update.message.text.lower()
     if user_id in current_characters:
@@ -240,4 +235,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
