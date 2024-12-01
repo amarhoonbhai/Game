@@ -2,9 +2,9 @@ import os
 import random
 from dotenv import load_dotenv
 from pymongo import MongoClient
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 # Load environment variables
 load_dotenv()
@@ -28,10 +28,8 @@ rarities = {
     "legendary": "Legendary 🌠"
 }
 
-# Global variables
+# Global variable to track the current character
 current_character = None
-message_counter = 0  # Counter for messages since the last correct guess
-message_threshold = 5  # Number of messages required before showing the next character
 
 
 # Helper Functions
@@ -58,19 +56,22 @@ def update_user_coins(user_id, user_name, coins):
 
 async def show_random_character(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
     """Show a random character in the chat."""
-    global current_character, message_counter
-    current_character = characters_collection.aggregate([{"$sample": {"size": 1}}]).next()
-    message_counter = 0  # Reset the message counter
-    await context.bot.send_photo(
-        chat_id=chat_id,
-        photo=current_character["image_url"],
-        caption=(
-            f"📢 **Guess the Character!** 📢\n\n"
-            f"⦿ **Rarity:** {current_character['rarity']}\n\n"
-            "🔥 **Can you guess their name? Type it in the chat!** 🔥"
-        ),
-        parse_mode=ParseMode.MARKDOWN
-    )
+    global current_character
+    try:
+        current_character = characters_collection.aggregate([{"$sample": {"size": 1}}]).next()
+        await context.bot.send_photo(
+            chat_id=chat_id,
+            photo=current_character["image_url"],
+            caption=(
+                f"📢 **Guess the Character!** 📢\n\n"
+                f"⦿ **Rarity:** {current_character['rarity']}\n\n"
+                "🔥 **Can you guess their name? Type it in the chat!** 🔥"
+            ),
+            parse_mode=ParseMode.MARKDOWN
+        )
+    except Exception as e:
+        await context.bot.send_message(chat_id, "⚠️ No characters in the database! Add some using /upload.")
+        print(f"Error showing random character: {e}")
 
 
 def is_sudo_user(user_id):
@@ -84,14 +85,11 @@ async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     if is_sudo_user(user_id):
         try:
-            args = context.args
-            if len(args) < 2:
-                await update.message.reply_text("⚠️ Usage: /upload <image_url> <name> [rarity]", parse_mode=ParseMode.MARKDOWN)
-                return
-            
-            image_url = args[0]
-            name = args[1]
-            rarity = rarities.get(args[2].lower(), assign_random_rarity()) if len(args) > 2 else assign_random_rarity()
+            image_url = context.args[0]
+            name = context.args[1] if len(context.args) > 1 else f"Character {characters_collection.count_documents({}) + 1}"
+            rarity = context.args[2].lower() if len(context.args) > 2 else None
+
+            rarity = rarities.get(rarity, assign_random_rarity())
 
             add_character_to_db(name, rarity, image_url)
 
@@ -101,8 +99,8 @@ async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"⦿ **Rarity:** {rarity}",
                 parse_mode=ParseMode.MARKDOWN
             )
-        except Exception as e:
-            await update.message.reply_text(f"❌ **Error:** {str(e)}", parse_mode=ParseMode.MARKDOWN)
+        except IndexError:
+            await update.message.reply_text("⚠️ Usage: /upload <image_url> [name] [rarity]", parse_mode=ParseMode.MARKDOWN)
     else:
         await update.message.reply_text("❌ **You are not authorized to use this command.** ❌", parse_mode=ParseMode.MARKDOWN)
 
@@ -112,35 +110,20 @@ async def addsudo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id == OWNER_ID:
         try:
             user_id = int(context.args[0])
-            if sudo_users_collection.find_one({"user_id": user_id}):
-                await update.message.reply_text(f"⚠️ **User {user_id} is already a sudo user.**", parse_mode=ParseMode.MARKDOWN)
-                return
-
             sudo_users_collection.insert_one({"user_id": user_id})
             await update.message.reply_text(f"✅ **User {user_id} added to sudo list.** ✅", parse_mode=ParseMode.MARKDOWN)
         except IndexError:
             await update.message.reply_text("⚠️ Usage: /addsudo <user_id>", parse_mode=ParseMode.MARKDOWN)
-        except Exception as e:
-            await update.message.reply_text(f"❌ **Error:** {str(e)}", parse_mode=ParseMode.MARKDOWN)
     else:
         await update.message.reply_text("❌ **You are not authorized to use this command.** ❌", parse_mode=ParseMode.MARKDOWN)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Welcome the user and start the bot."""
-    keyboard = [
-        [
-            InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/TechPiro"),
-            InlineKeyboardButton("📂 Source Code", url="https://t.me/TechPiroBots"),
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
     await update.message.reply_text(
         "🎉 **Welcome to the Anime Guessing Bot!** 🎉\n\n"
         "⦿ **Type a character's name to guess and earn coins!** 💰\n\n"
         "✨ Have fun playing! ✨",
-        reply_markup=reply_markup,
         parse_mode=ParseMode.MARKDOWN
     )
     await show_random_character(context, update.effective_chat.id)
@@ -176,9 +159,8 @@ async def level(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def guess_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle user guesses and message threshold for new characters."""
-    global current_character, message_counter
-
+    """Handle user guesses."""
+    global current_character
     if not current_character:
         return
 
@@ -194,11 +176,21 @@ async def guess_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"💰 **You earned 1000 coins!**",
             parse_mode=ParseMode.MARKDOWN
         )
+        await show_random_character(context, update.effective_chat.id)
     else:
-        message_counter += 1
-        if message_counter >= message_threshold:
-            await show_random_character(context, update.effective_chat.id)
-            return
+        await update.message.reply_text("❌ **Wrong guess! Try again!**", parse_mode=ParseMode.MARKDOWN)
+
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show bot statistics."""
+    total_users = users_collection.count_documents({})
+    total_characters = characters_collection.count_documents({})
+    await update.message.reply_text(
+        f"📊 **Bot Statistics** 📊\n\n"
+        f"⦿ **Total Users:** {total_users}\n"
+        f"⦿ **Total Characters:** {total_characters}\n",
+        parse_mode=ParseMode.MARKDOWN
+    )
 
 
 def main():
@@ -210,6 +202,7 @@ def main():
     application.add_handler(CommandHandler("upload", upload))
     application.add_handler(CommandHandler("addsudo", addsudo))
     application.add_handler(CommandHandler("level", level))
+    application.add_handler(CommandHandler("stats", stats))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, guess_handler))
 
     # Start the Bot
@@ -218,4 +211,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
