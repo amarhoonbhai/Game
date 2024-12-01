@@ -4,6 +4,10 @@ from dotenv import load_dotenv
 from pymongo import MongoClient
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
+import logging
+
+# Enable logging for debugging
+logging.basicConfig(level=logging.DEBUG)
 
 # Load environment variables
 load_dotenv()
@@ -29,10 +33,10 @@ sudo_users = []
 
 # Rarity emojis and probabilities
 RARITY_EMOJIS = {
-    "Common": "🌱",
-    "Elite": "✨",
-    "Rare": "🌟",
-    "Legendary": "🔥",
+    "Common": "◈ 🌱 Common",
+    "Elite": "◈ ✨ Elite",
+    "Rare": "◈ 🌟 Rare",
+    "Legendary": "◈ 🔥 Legendary",
 }
 RARITY_PROBABILITIES = [("Common", 50), ("Elite", 30), ("Rare", 15), ("Legendary", 5)]
 
@@ -46,42 +50,45 @@ def random_rarity():
 # Commands
 async def start(update: Update, context: CallbackContext) -> None:
     """Handles the /start command."""
-    with open("philo_game.jpeg", "rb") as image:  # Replace with your image path
+    logging.debug("Start command triggered")
+    with open("philo_game.jpeg", "rb") as image:
         await update.message.reply_photo(
             photo=image,
             caption=(
-                "🎮 Welcome to **Philo Game Bot**! 🎉\n\n"
-                "🌟 Explore the world of rare characters:\n"
+                "🎮 **Welcome to Philo Game Bot!** 🎉\n\n"
+                "◈ 🌟 **Unleash your skills and guess rare characters!**\n\n"
+                "◈ ✨ **Rarities to Discover:**\n"
                 "🌱 Common, ✨ Elite, 🌟 Rare, 🔥 Legendary\n\n"
-                "💡 Use /help to learn more about commands and gameplay!"
+                "◈ 💡 **How to Play:**\n"
+                "Send messages, guess characters, and earn coins!\n\n"
+                "◈ Use /help for detailed commands."
             ),
+            parse_mode="Markdown",
         )
     keyboard = [
-        [InlineKeyboardButton("Developer", url="https://t.me/TechPiro")],
-        [InlineKeyboardButton("Source Code", url="https://t.me/TechPiroBots")]
+        [InlineKeyboardButton("◈ Developer 👨‍💻", url="https://t.me/TechPiro")],
+        [InlineKeyboardButton("◈ Source Code 🛠️", url="https://t.me/TechPiroBots")],
+        [InlineKeyboardButton("◈ Play Now 🎮", callback_data="play_game")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("👇 Explore more:", reply_markup=reply_markup)
+    await update.message.reply_text("👇 **Explore more:**", reply_markup=reply_markup)
 
 
 async def help_command(update: Update, context: CallbackContext) -> None:
     """Handles the /help command."""
     await update.message.reply_text(
         "📜 **Commands:**\n"
-        "/start - Start the bot\n"
-        "/help - Show this help message\n"
-        "/stats - View bot statistics\n"
-        "/upload - Upload a character (Owner & Sudo Only)\n"
-        "/levels - Top 10 users\n"
-        "/addsudo - Add a sudo user (Owner Only)\n\n"
-        "💡 **Gameplay:**\n"
-        "- Characters will appear every 5 messages.\n"
-        "- Guess the character's name to earn 100 coins!\n\n"
-        "🌱 **Rarities**:\n"
-        "- 🌱 Common\n"
-        "- ✨ Elite\n"
-        "- 🌟 Rare\n"
-        "- 🔥 Legendary"
+        "◈ /start - Start the bot and view welcome message\n"
+        "◈ /help - Show this help message\n"
+        "◈ /stats - View bot statistics\n"
+        "◈ /upload - Upload a character (Owner & Sudo Only)\n"
+        "◈ /levels - View top 10 users\n"
+        "◈ /addsudo - Add a sudo user (Owner Only)\n\n"
+        "◈ 💡 **Gameplay:**\n"
+        "💬 Send messages to trigger characters.\n"
+        "🎯 Guess the name and earn coins (100 coins per correct guess).\n\n"
+        "◈ 🌟 **Character Rarities:**\n"
+        "◈ 🌱 Common, ◈ ✨ Elite, ◈ 🌟 Rare, ◈ 🔥 Legendary"
     )
 
 
@@ -96,12 +103,12 @@ async def stats(update: Update, context: CallbackContext) -> None:
 
     await update.message.reply_text(
         f"📊 **Bot Statistics:**\n"
-        f"👥 Total Users: {total_users}\n"
-        f"🧩 Total Characters: {total_characters}\n"
-        f"🌱 Common Characters: {common_characters}\n"
-        f"✨ Elite Characters: {elite_characters}\n"
-        f"🌟 Rare Characters: {rare_characters}\n"
-        f"🔥 Legendary Characters: {legendary_characters}"
+        f"◈ 👥 Total Users: {total_users}\n"
+        f"◈ 🧩 Total Characters: {total_characters}\n"
+        f"◈ 🌱 Common Characters: {common_characters}\n"
+        f"◈ ✨ Elite Characters: {elite_characters}\n"
+        f"◈ 🌟 Rare Characters: {rare_characters}\n"
+        f"◈ 🔥 Legendary Characters: {legendary_characters}"
     )
 
 
@@ -133,8 +140,9 @@ async def upload(update: Update, context: CallbackContext) -> None:
         "image_url": image_url,
     })
     await update.message.reply_text(
-        f"✅ Character {character_name} uploaded successfully!\n"
-        f"Rarity: {RARITY_EMOJIS[rarity]} {rarity}"
+        f"✅ **Character Uploaded!**\n"
+        f"◈ 🧩 Name: {character_name}\n"
+        f"◈ 🌟 Rarity: {RARITY_EMOJIS[rarity]}"
     )
 
 
@@ -142,7 +150,7 @@ async def levels(update: Update, context: CallbackContext) -> None:
     """Handles the /levels command."""
     top_users = list(users_collection.find().sort("coins", -1).limit(10))
     leaderboard = "\n".join(
-        [f"{i+1}. {user['username'] or user['user_id']} - {user['coins']} coins"
+        [f"◈ {i+1}. {user['username'] or user['user_id']} - {user['coins']} coins"
          for i, user in enumerate(top_users)]
     )
     await update.message.reply_text(f"🏆 **Top 10 Users:**\n{leaderboard}")
@@ -163,6 +171,23 @@ async def addsudo(update: Update, context: CallbackContext) -> None:
     await update.message.reply_text(f"✅ User {sudo_user} added as sudo user.")
 
 
+async def send_character(update: Update, user_id: int):
+    """Fetches and sends a new character."""
+    character = characters_collection.aggregate([{"$sample": {"size": 1}}])
+    character = next(character, None)
+    if character:
+        rarity_emoji = RARITY_EMOJIS.get(character["rarity"], "❓")
+        current_characters[user_id] = character["name"]
+        await update.message.reply_photo(
+            photo=character["image_url"],
+            caption=(
+                f"🎉 **Guess the Character!**\n\n"
+                f"◈ 🌟 Rarity: {rarity_emoji}\n"
+                f"🎯 Earn 100 coins for the correct guess!"
+            ),
+        )
+
+
 async def handle_message(update: Update, context: CallbackContext) -> None:
     """Handles user messages and the character guessing game."""
     user_id = update.message.from_user.id
@@ -170,6 +195,11 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
 
     # Increment user's message count
     message_count[user_id] = message_count.get(user_id, 0) + 1
+
+    # Notify user of remaining messages until character appears
+    remaining_messages = 5 - (message_count[user_id] % 5)
+    if remaining_messages != 5:  # Notify only if not a character appearance
+        await update.message.reply_text(f"◈ 💬 Keep chatting! {remaining_messages} message(s) left for the next character.")
 
     # Check if the user guessed correctly
     guess = update.message.text.lower()
@@ -185,26 +215,13 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
                     {"user_id": user_id},
                     {"$set": {"username": username}, "$inc": {"coins": 100}}
                 )
-            await update.message.reply_text("🎉 Correct! You earned 100 coins! 💰")
+            await update.message.reply_text("🎉 **Correct Guess!** You earned 100 coins! 💰")
             await send_character(update, user_id)  # Send the next character immediately
             return
 
-    # Check if the user has reached the 5-message threshold
+    # Trigger character after 5 messages
     if message_count[user_id] % 5 == 0:
         await send_character(update, user_id)
-
-
-async def send_character(update: Update, user_id: int):
-    """Fetches and sends a new character."""
-    character = characters_collection.aggregate([{"$sample": {"size": 1}}])
-    character = next(character, None)
-    if character:
-        rarity_emoji = RARITY_EMOJIS.get(character["rarity"], "❓")
-        current_characters[user_id] = character["name"]
-        await update.message.reply_photo(
-            photo=character["image_url"],
-            caption=f"🎉 **Guess the Character!**\nRarity: {rarity_emoji} {character['rarity']}",
-        )
 
 
 def main():
@@ -223,3 +240,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
