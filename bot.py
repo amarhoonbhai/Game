@@ -2,8 +2,9 @@ import os
 import random
 from dotenv import load_dotenv
 from pymongo import MongoClient
-from telegram import Update, ParseMode
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+from telegram import Update
+from telegram.constants import ParseMode
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # Load environment variables
 load_dotenv()
@@ -53,11 +54,11 @@ def update_user_coins(user_id, user_name, coins):
         users_collection.insert_one({"user_id": user_id, "name": user_name, "coins": coins})
 
 
-def show_random_character(context: CallbackContext, chat_id: int):
+async def show_random_character(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
     """Show a random character in the chat."""
     global current_character
     current_character = characters_collection.aggregate([{"$sample": {"size": 1}}]).next()
-    context.bot.send_photo(
+    await context.bot.send_photo(
         chat_id=chat_id,
         photo=current_character["image_url"],
         caption=(
@@ -74,8 +75,8 @@ def is_sudo_user(user_id):
     return user_id == OWNER_ID or sudo_users_collection.find_one({"user_id": user_id}) is not None
 
 
-# Command: /upload
-def upload(update: Update, context: CallbackContext):
+# Command Handlers
+async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Allow the owner or sudo users to upload a character."""
     user_id = update.message.from_user.id
     if is_sudo_user(user_id):
@@ -84,70 +85,62 @@ def upload(update: Update, context: CallbackContext):
             name = context.args[1] if len(context.args) > 1 else f"Character {characters_collection.count_documents({}) + 1}"
             rarity = context.args[2].lower() if len(context.args) > 2 else None
 
-            # Validate rarity or assign random
             rarity = rarities.get(rarity, assign_random_rarity())
 
-            # Add character to MongoDB
             add_character_to_db(name, rarity, image_url)
 
-            # Confirm success
-            update.message.reply_text(
+            await update.message.reply_text(
                 f"✅ **Character added successfully!** ✅\n\n"
                 f"⦿ **Name:** {name}\n"
                 f"⦿ **Rarity:** {rarity}",
                 parse_mode=ParseMode.MARKDOWN
             )
         except IndexError:
-            update.message.reply_text("⚠️ Usage: /upload <image_url> [name] [rarity]", parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text("⚠️ Usage: /upload <image_url> [name] [rarity]", parse_mode=ParseMode.MARKDOWN)
     else:
-        update.message.reply_text("❌ **You are not authorized to use this command.** ❌", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("❌ **You are not authorized to use this command.** ❌", parse_mode=ParseMode.MARKDOWN)
 
 
-# Command: /addsudo
-def addsudo(update: Update, context: CallbackContext):
+async def addsudo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Add a sudo user (owner only)."""
     if update.message.from_user.id == OWNER_ID:
         try:
             user_id = int(context.args[0])
             sudo_users_collection.insert_one({"user_id": user_id})
-            update.message.reply_text(f"✅ **User {user_id} added to sudo list.** ✅", parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text(f"✅ **User {user_id} added to sudo list.** ✅", parse_mode=ParseMode.MARKDOWN)
         except IndexError:
-            update.message.reply_text("⚠️ Usage: /addsudo <user_id>", parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text("⚠️ Usage: /addsudo <user_id>", parse_mode=ParseMode.MARKDOWN)
     else:
-        update.message.reply_text("❌ **You are not authorized to use this command.** ❌", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("❌ **You are not authorized to use this command.** ❌", parse_mode=ParseMode.MARKDOWN)
 
 
-# Command: /rmsudo
-def rmsudo(update: Update, context: CallbackContext):
+async def rmsudo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Remove a sudo user (owner only)."""
     if update.message.from_user.id == OWNER_ID:
         try:
             user_id = int(context.args[0])
             sudo_users_collection.delete_one({"user_id": user_id})
-            update.message.reply_text(f"✅ **User {user_id} removed from sudo list.** ✅", parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text(f"✅ **User {user_id} removed from sudo list.** ✅", parse_mode=ParseMode.MARKDOWN)
         except IndexError:
-            update.message.reply_text("⚠️ Usage: /rmsudo <user_id>", parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text("⚠️ Usage: /rmsudo <user_id>", parse_mode=ParseMode.MARKDOWN)
     else:
-        update.message.reply_text("❌ **You are not authorized to use this command.** ❌", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("❌ **You are not authorized to use this command.** ❌", parse_mode=ParseMode.MARKDOWN)
 
 
-# Command: /start
-def start(update: Update, context: CallbackContext):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Welcome the user and start the bot."""
-    update.message.reply_text(
+    await update.message.reply_text(
         "🎉 **Welcome to the Anime Guessing Bot!** 🎉\n\n"
         "⦿ **Type a character's name to guess and earn coins!** 💰\n\n"
         "✨ Have fun playing! ✨",
         parse_mode=ParseMode.MARKDOWN
     )
-    # Show the first random character
-    show_random_character(context, update.effective_chat.id)
+    await show_random_character(context, update.effective_chat.id)
 
 
-# Command: /help
-def help_command(update: Update, context: CallbackContext):
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show the help message."""
-    update.message.reply_text(
+    await update.message.reply_text(
         "📜 **Commands** 📜\n\n"
         "⦿ /start - Start the bot and display a random character.\n"
         "⦿ /help - Show this help menu.\n"
@@ -165,14 +158,13 @@ def help_command(update: Update, context: CallbackContext):
     )
 
 
-# Command: /stats
-def stats(update: Update, context: CallbackContext):
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show bot stats."""
     total_users = users_collection.count_documents({})
     total_characters = characters_collection.count_documents({})
     total_coins = sum(user["coins"] for user in users_collection.find())
 
-    update.message.reply_text(
+    await update.message.reply_text(
         f"📊 **Bot Stats** 📊\n\n"
         f"⦿ **Total Users:** {total_users}\n"
         f"⦿ **Total Characters:** {total_characters}\n"
@@ -182,18 +174,16 @@ def stats(update: Update, context: CallbackContext):
     )
 
 
-# Command: /level
-def level(update: Update, context: CallbackContext):
+async def level(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show the top 10 players."""
     top_users = users_collection.find().sort("coins", -1).limit(10)
     leaderboard = "🏆 **Top 10 Players** 🏆\n\n"
     for i, user in enumerate(top_users, start=1):
         leaderboard += f"⦿ {i}. **{user['name']}** - 💰 {user['coins']} coins\n"
-    update.message.reply_text(leaderboard, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(leaderboard, parse_mode=ParseMode.MARKDOWN)
 
 
-# Guess Handler
-def guess_handler(update: Update, context: CallbackContext):
+async def guess_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle user guesses."""
     global current_character
     if not current_character:
@@ -205,38 +195,32 @@ def guess_handler(update: Update, context: CallbackContext):
     character_name = current_character["name"].lower()
 
     if guess in character_name:
-        # Correct guess
         update_user_coins(user_id, user_name, 1000)
-        update.message.reply_text(
+        await update.message.reply_text(
             f"🎉 **Correct!** You guessed **{current_character['name']}**.\n"
             f"💰 **You earned 1000 coins!**",
             parse_mode=ParseMode.MARKDOWN
         )
-        # Show the next character
-        show_random_character(context, update.effective_chat.id)
+        await show_random_character(context, update.effective_chat.id)
     else:
-        # Incorrect guess
-        update.message.reply_text("❌ **Wrong guess! Try again!**", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("❌ **Wrong guess! Try again!**", parse_mode=ParseMode.MARKDOWN)
 
 
-# Main Function
 def main():
-    updater = Updater(BOT_TOKEN, use_context=True)
-    dp = updater.dispatcher
+    application = Application.builder().token(BOT_TOKEN).build()
 
     # Register Handlers
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("help", help_command))
-    dp.add_handler(CommandHandler("upload", upload))
-    dp.add_handler(CommandHandler("stats", stats))
-    dp.add_handler(CommandHandler("level", level))
-    dp.add_handler(CommandHandler("addsudo", addsudo))
-    dp.add_handler(CommandHandler("rmsudo", rmsudo))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, guess_handler))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("upload", upload))
+    application.add_handler(CommandHandler("stats", stats))
+    application.add_handler(CommandHandler("level", level))
+    application.add_handler(CommandHandler("addsudo", addsudo))
+    application.add_handler(CommandHandler("rmsudo", rmsudo))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, guess_handler))
 
     # Start the Bot
-    updater.start_polling()
-    updater.idle()
+    application.run_polling()
 
 
 if __name__ == "__main__":
