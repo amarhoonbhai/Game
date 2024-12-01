@@ -3,7 +3,7 @@ import random
 from dotenv import load_dotenv
 from pymongo import MongoClient
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+from telegram.ext import Updater, CommandHandler, MessageHandler, filters, CallbackContext
 
 # Load environment variables
 load_dotenv()
@@ -12,10 +12,15 @@ MONGO_URI = os.getenv("MONGO_URI")
 OWNER_ID = int(os.getenv("OWNER_ID"))
 
 # MongoDB setup
-client = MongoClient(MONGO_URI)
-db = client["telegram_bot"]
-characters_collection = db["characters"]
-users_collection = db["users"]
+try:
+    client = MongoClient(MONGO_URI)
+    db = client["telegram_bot"]
+    characters_collection = db["characters"]
+    users_collection = db["users"]
+    print("✅ MongoDB connected successfully!")
+except Exception as e:
+    print(f"❌ Failed to connect to MongoDB: {e}")
+    exit()
 
 # Globals
 message_count = {}
@@ -159,8 +164,10 @@ def handle_message(update: Update, context: CallbackContext) -> None:
     user_id = update.message.from_user.id
     username = update.message.from_user.username
 
+    # Increment user's message count
     message_count[user_id] = message_count.get(user_id, 0) + 1
 
+    # Check if the user has reached the 5-message threshold
     if message_count[user_id] % 5 == 0:
         character = characters_collection.aggregate([{"$sample": {"size": 1}}])
         character = next(character, None)
@@ -176,18 +183,21 @@ def handle_message(update: Update, context: CallbackContext) -> None:
             update.message.reply_text("⚠️ No characters available in the database.")
         return
 
+    # Check if the user guessed correctly
     guess = update.message.text.lower()
-    if user_id in current_characters and guess == current_characters[user_id]:
-        current_characters.pop(user_id)
-        user = users_collection.find_one({"user_id": user_id})
-        if not user:
-            users_collection.insert_one({"user_id": user_id, "username": username, "coins": 100})
-        else:
-            users_collection.update_one(
-                {"user_id": user_id},
-                {"$set": {"username": username}, "$inc": {"coins": 100}}
-            )
-        update.message.reply_text("🎉 Correct! You earned 100 coins! 💰")
+    if user_id in current_characters:
+        character_name = current_characters[user_id]
+        if any(word in character_name.split() for word in guess.split()):
+            current_characters.pop(user_id)
+            user = users_collection.find_one({"user_id": user_id})
+            if not user:
+                users_collection.insert_one({"user_id": user_id, "username": username, "coins": 100})
+            else:
+                users_collection.update_one(
+                    {"user_id": user_id},
+                    {"$set": {"username": username}, "$inc": {"coins": 100}}
+                )
+            update.message.reply_text("🎉 Correct! You earned 100 coins! 💰")
 
 
 def main():
@@ -200,7 +210,7 @@ def main():
     dispatcher.add_handler(CommandHandler("upload", upload))
     dispatcher.add_handler(CommandHandler("levels", levels))
     dispatcher.add_handler(CommandHandler("addsudo", addsudo))
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+    dispatcher.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     updater.start_polling()
     updater.idle()
