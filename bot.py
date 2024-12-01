@@ -114,19 +114,6 @@ async def addsudo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ **You are not authorized to use this command.** ❌", parse_mode=ParseMode.MARKDOWN)
 
 
-async def rmsudo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Remove a sudo user (owner only)."""
-    if update.message.from_user.id == OWNER_ID:
-        try:
-            user_id = int(context.args[0])
-            sudo_users_collection.delete_one({"user_id": user_id})
-            await update.message.reply_text(f"✅ **User {user_id} removed from sudo list.** ✅", parse_mode=ParseMode.MARKDOWN)
-        except IndexError:
-            await update.message.reply_text("⚠️ Usage: /rmsudo <user_id>", parse_mode=ParseMode.MARKDOWN)
-    else:
-        await update.message.reply_text("❌ **You are not authorized to use this command.** ❌", parse_mode=ParseMode.MARKDOWN)
-
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Welcome the user and start the bot."""
     await update.message.reply_text(
@@ -147,8 +134,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⦿ /upload - Upload a character (owner/sudo only).\n"
         "⦿ /stats - Check bot statistics.\n"
         "⦿ /level - View the top 10 players.\n"
-        "⦿ /addsudo - Add a sudo user (owner only).\n"
-        "⦿ /rmsudo - Remove a sudo user (owner only).\n\n"
+        "⦿ /addsudo - Add a sudo user (owner only).\n\n"
         "✨ **How to Play** ✨\n\n"
         "1️⃣ A random character will appear.\n"
         "2️⃣ Guess their name by typing it in the chat.\n"
@@ -158,28 +144,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show bot stats."""
-    total_users = users_collection.count_documents({})
-    total_characters = characters_collection.count_documents({})
-    total_coins = sum(user["coins"] for user in users_collection.find())
-
-    await update.message.reply_text(
-        f"📊 **Bot Stats** 📊\n\n"
-        f"⦿ **Total Users:** {total_users}\n"
-        f"⦿ **Total Characters:** {total_characters}\n"
-        f"⦿ **Total Coins Earned:** {total_coins}\n\n"
-        f"✨ Thank you for playing and supporting the bot! ✨",
-        parse_mode=ParseMode.MARKDOWN
-    )
-
-
 async def level(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show the top 10 players."""
     top_users = users_collection.find().sort("coins", -1).limit(10)
     leaderboard = "🏆 **Top 10 Players** 🏆\n\n"
     for i, user in enumerate(top_users, start=1):
-        leaderboard += f"⦿ {i}. **{user['name']}** - 💰 {user['coins']} coins\n"
+        full_name = user["name"] if user["name"] else "Unknown Player"
+        leaderboard += f"⦿ {i}. **{full_name}** - 💰 {user['coins']} coins\n"
     await update.message.reply_text(leaderboard, parse_mode=ParseMode.MARKDOWN)
 
 
@@ -213,10 +184,8 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("upload", upload))
-    application.add_handler(CommandHandler("stats", stats))
-    application.add_handler(CommandHandler("level", level))
     application.add_handler(CommandHandler("addsudo", addsudo))
-    application.add_handler(CommandHandler("rmsudo", rmsudo))
+    application.add_handler(CommandHandler("level", level))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, guess_handler))
 
     # Start the Bot
