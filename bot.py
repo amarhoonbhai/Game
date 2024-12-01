@@ -1,3 +1,4 @@
+import asyncio
 import os
 import random
 from dotenv import load_dotenv
@@ -73,6 +74,33 @@ async def send_character(update: Update, user_id: int):
         ),
     )
     logging.info(f"Character '{character['name']}' sent to user {user_id}.")
+
+
+# /start Command
+async def start(update: Update, context: CallbackContext):
+    """Handle the /start command."""
+    await update.message.reply_text(
+        text=(
+            "🎮 **Welcome to Philo Game Bot!** 🎉\n\n"
+            "🌟 **Test your detective skills and guess the characters!**\n\n"
+            "🔹 **Explore Different Rarities:**\n"
+            "◈ 🌱 Common, ◈ ✨ Elite, ◈ 🌟 Rare, ◈ 🔥 Legendary\n\n"
+            "💡 **How to Play:**\n"
+            f"1️⃣ Send messages in the chat.\n"
+            f"2️⃣ After every {MESSAGE_THRESHOLD} messages, a character will appear.\n"
+            "3️⃣ Guess the character's name (or any part of it) to win **1000 coins**.\n\n"
+            "🔑 **Explore Commands:**\n"
+            "Use /help to view all available commands.\n\n"
+            "🎯 **Let the game begin!**"
+        ),
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("◈ Developer - @TechPiro", url="https://t.me/TechPiro")],
+                [InlineKeyboardButton("◈ Source Code - @TechPiroBots", url="https://t.me/TechPiroBots")],
+            ]
+        ),
+    )
 
 
 # /upload Command
@@ -178,15 +206,57 @@ async def stats(update: Update, context: CallbackContext):
     )
 
 
+# Handle messages for gameplay
+async def handle_message(update: Update, context: CallbackContext):
+    """Handle user messages and game logic."""
+    user_id = update.message.from_user.id
+    username = update.message.from_user.username or "User"
+    first_name = update.message.from_user.first_name or ""
+    last_name = update.message.from_user.last_name or ""
+
+    # Increment message count
+    message_count[user_id] = message_count.get(user_id, 0) + 1
+    logging.info(f"Message count for user {user_id}: {message_count[user_id]}")
+
+    # Check if the user is guessing
+    guess = update.message.text.lower()
+    if user_id in current_characters:
+        character_name = current_characters[user_id]
+        # If any word in the guess matches any word in the character's name
+        if any(word in character_name.split() for word in guess.split()):
+            current_characters.pop(user_id)
+            # Update coins for the user
+            users_collection.update_one(
+                {"user_id": user_id},
+                {
+                    "$set": {"username": username, "first_name": first_name, "last_name": last_name},
+                    "$inc": {"coins": 1000},
+                },
+                upsert=True,
+            )
+            await update.message.reply_text(
+                f"🎉 **Correct Guess! You've earned 1000 coins!** 💰\n"
+                f"🔹 The correct name was: **{character_name.title()}**"
+            )
+            await send_character(update, user_id)  # Immediately send another character
+            return
+
+    # Trigger new character after MESSAGE_THRESHOLD messages
+    if message_count[user_id] % MESSAGE_THRESHOLD == 0:
+        await send_character(update, user_id)
+
+
 # Main function to run the bot
 async def main():
     """Run the bot."""
     application = Application.builder().token(BOT_TOKEN).build()
 
+    application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("upload", upload))
     application.add_handler(CommandHandler("addsudo", addsudo))
     application.add_handler(CommandHandler("rmsudo", rmsudo))
     application.add_handler(CommandHandler("stats", stats))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     await application.run_polling()
 
@@ -198,4 +268,3 @@ if __name__ == "__main__":
             asyncio.run(main())
         except Exception as e:
             logging.error(f"Error occurred: {e}. Restarting bot...")
-            
