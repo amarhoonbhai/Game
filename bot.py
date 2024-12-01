@@ -70,7 +70,7 @@ async def help_command(update: Update, context: CallbackContext) -> None:
         "📜 **Commands:**\n"
         "/start - Start the bot\n"
         "/help - Show this help message\n"
-        "/stats - View your stats (Owner & Sudo Only)\n"
+        "/stats - View bot statistics\n"
         "/upload - Upload a character (Owner & Sudo Only)\n"
         "/levels - Top 10 users\n"
         "/addsudo - Add a sudo user (Owner Only)\n\n"
@@ -86,18 +86,23 @@ async def help_command(update: Update, context: CallbackContext) -> None:
 
 
 async def stats(update: Update, context: CallbackContext) -> None:
-    """Handles the /stats command."""
-    user_id = update.message.from_user.id
-    if user_id != OWNER_ID and user_id not in sudo_users:
-        await update.message.reply_text("❌ You are not authorized to use this command.")
-        return
+    """Handles the /stats command to show bot statistics."""
+    total_users = users_collection.count_documents({})
+    total_characters = characters_collection.count_documents({})
+    common_characters = characters_collection.count_documents({"rarity": "Common"})
+    elite_characters = characters_collection.count_documents({"rarity": "Elite"})
+    rare_characters = characters_collection.count_documents({"rarity": "Rare"})
+    legendary_characters = characters_collection.count_documents({"rarity": "Legendary"})
 
-    user = users_collection.find_one({"user_id": user_id})
-    if not user:
-        await update.message.reply_text("You have no stats yet!")
-        return
-    coins = user.get("coins", 0)
-    await update.message.reply_text(f"📊 **Your Stats:**\nCoins: {coins}")
+    await update.message.reply_text(
+        f"📊 **Bot Statistics:**\n"
+        f"👥 Total Users: {total_users}\n"
+        f"🧩 Total Characters: {total_characters}\n"
+        f"🌱 Common Characters: {common_characters}\n"
+        f"✨ Elite Characters: {elite_characters}\n"
+        f"🌟 Rare Characters: {rare_characters}\n"
+        f"🔥 Legendary Characters: {legendary_characters}"
+    )
 
 
 async def upload(update: Update, context: CallbackContext) -> None:
@@ -133,6 +138,31 @@ async def upload(update: Update, context: CallbackContext) -> None:
     )
 
 
+async def levels(update: Update, context: CallbackContext) -> None:
+    """Handles the /levels command."""
+    top_users = list(users_collection.find().sort("coins", -1).limit(10))
+    leaderboard = "\n".join(
+        [f"{i+1}. {user['username'] or user['user_id']} - {user['coins']} coins"
+         for i, user in enumerate(top_users)]
+    )
+    await update.message.reply_text(f"🏆 **Top 10 Users:**\n{leaderboard}")
+
+
+async def addsudo(update: Update, context: CallbackContext) -> None:
+    """Handles the /addsudo command."""
+    user_id = update.message.from_user.id
+    if user_id != OWNER_ID:
+        await update.message.reply_text("❌ You are not authorized to use this command.")
+        return
+    if len(context.args) < 1:
+        await update.message.reply_text("⚠️ Usage: /addsudo <user_id>")
+        return
+
+    sudo_user = int(context.args[0])
+    sudo_users.append(sudo_user)
+    await update.message.reply_text(f"✅ User {sudo_user} added as sudo user.")
+
+
 async def handle_message(update: Update, context: CallbackContext) -> None:
     """Handles user messages and the character guessing game."""
     user_id = update.message.from_user.id
@@ -140,21 +170,6 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
 
     # Increment user's message count
     message_count[user_id] = message_count.get(user_id, 0) + 1
-
-    # Check if the user has reached the 5-message threshold
-    if message_count[user_id] % 5 == 0:
-        character = characters_collection.aggregate([{"$sample": {"size": 1}}])
-        character = next(character, None)
-        if character:
-            rarity_emoji = RARITY_EMOJIS.get(character["rarity"], "❓")
-            current_characters[user_id] = character["name"]
-            await update.message.reply_photo(
-                photo=character["image_url"],
-                caption=f"🎉 **Guess the Character!**\nRarity: {rarity_emoji} {character['rarity']}",
-            )
-        else:
-            await update.message.reply_text("⚠️ No characters available in the database.")
-        return
 
     # Check if the user guessed correctly
     guess = update.message.text.lower()
@@ -171,6 +186,25 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
                     {"$set": {"username": username}, "$inc": {"coins": 100}}
                 )
             await update.message.reply_text("🎉 Correct! You earned 100 coins! 💰")
+            await send_character(update, user_id)  # Send the next character immediately
+            return
+
+    # Check if the user has reached the 5-message threshold
+    if message_count[user_id] % 5 == 0:
+        await send_character(update, user_id)
+
+
+async def send_character(update: Update, user_id: int):
+    """Fetches and sends a new character."""
+    character = characters_collection.aggregate([{"$sample": {"size": 1}}])
+    character = next(character, None)
+    if character:
+        rarity_emoji = RARITY_EMOJIS.get(character["rarity"], "❓")
+        current_characters[user_id] = character["name"]
+        await update.message.reply_photo(
+            photo=character["image_url"],
+            caption=f"🎉 **Guess the Character!**\nRarity: {rarity_emoji} {character['rarity']}",
+        )
 
 
 def main():
@@ -180,6 +214,8 @@ def main():
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("stats", stats))
     application.add_handler(CommandHandler("upload", upload))
+    application.add_handler(CommandHandler("levels", levels))
+    application.add_handler(CommandHandler("addsudo", addsudo))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     application.run_polling()
