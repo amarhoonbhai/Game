@@ -3,7 +3,7 @@ import random
 from dotenv import load_dotenv
 from pymongo import MongoClient
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, MessageHandler, filters, CallbackContext
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
 
 # Load environment variables
 load_dotenv()
@@ -44,10 +44,10 @@ def random_rarity():
 
 
 # Commands
-def start(update: Update, context: CallbackContext) -> None:
+async def start(update: Update, context: CallbackContext) -> None:
     """Handles the /start command."""
     with open("philo_game.jpeg", "rb") as image:  # Replace with your image path
-        update.message.reply_photo(
+        await update.message.reply_photo(
             photo=image,
             caption=(
                 "🎮 Welcome to **Philo Game Bot**! 🎉\n\n"
@@ -55,19 +55,18 @@ def start(update: Update, context: CallbackContext) -> None:
                 "🌱 Common, ✨ Elite, 🌟 Rare, 🔥 Legendary\n\n"
                 "💡 Use /help to learn more about commands and gameplay!"
             ),
-            parse_mode="Markdown",
         )
     keyboard = [
         [InlineKeyboardButton("Developer", url="https://t.me/TechPiro")],
         [InlineKeyboardButton("Source Code", url="https://t.me/TechPiroBots")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    update.message.reply_text("👇 Explore more:", reply_markup=reply_markup)
+    await update.message.reply_text("👇 Explore more:", reply_markup=reply_markup)
 
 
-def help_command(update: Update, context: CallbackContext) -> None:
+async def help_command(update: Update, context: CallbackContext) -> None:
     """Handles the /help command."""
-    update.message.reply_text(
+    await update.message.reply_text(
         "📜 **Commands:**\n"
         "/start - Start the bot\n"
         "/help - Show this help message\n"
@@ -86,30 +85,30 @@ def help_command(update: Update, context: CallbackContext) -> None:
     )
 
 
-def stats(update: Update, context: CallbackContext) -> None:
+async def stats(update: Update, context: CallbackContext) -> None:
     """Handles the /stats command."""
     user_id = update.message.from_user.id
     if user_id != OWNER_ID and user_id not in sudo_users:
-        update.message.reply_text("❌ You are not authorized to use this command.")
+        await update.message.reply_text("❌ You are not authorized to use this command.")
         return
 
     user = users_collection.find_one({"user_id": user_id})
     if not user:
-        update.message.reply_text("You have no stats yet!")
+        await update.message.reply_text("You have no stats yet!")
         return
     coins = user.get("coins", 0)
-    update.message.reply_text(f"📊 **Your Stats:**\nCoins: {coins}")
+    await update.message.reply_text(f"📊 **Your Stats:**\nCoins: {coins}")
 
 
-def upload(update: Update, context: CallbackContext) -> None:
+async def upload(update: Update, context: CallbackContext) -> None:
     """Handles the /upload command."""
     user_id = update.message.from_user.id
     if user_id != OWNER_ID and user_id not in sudo_users:
-        update.message.reply_text("❌ You are not authorized to use this command.")
+        await update.message.reply_text("❌ You are not authorized to use this command.")
         return
 
     if len(context.args) < 2:
-        update.message.reply_text("⚠️ Usage: /upload <character_name> <image_url> [rarity]")
+        await update.message.reply_text("⚠️ Usage: /upload <character_name> <image_url> [rarity]")
         return
 
     character_name = context.args[0]
@@ -117,7 +116,7 @@ def upload(update: Update, context: CallbackContext) -> None:
     rarity = context.args[2].capitalize() if len(context.args) > 2 else None
 
     if rarity and rarity not in RARITY_EMOJIS:
-        update.message.reply_text("⚠️ Invalid rarity! Use one of: Common, Elite, Rare, Legendary.")
+        await update.message.reply_text("⚠️ Invalid rarity! Use one of: Common, Elite, Rare, Legendary.")
         return
 
     if not rarity:
@@ -128,38 +127,13 @@ def upload(update: Update, context: CallbackContext) -> None:
         "rarity": rarity,
         "image_url": image_url,
     })
-    update.message.reply_text(
+    await update.message.reply_text(
         f"✅ Character {character_name} uploaded successfully!\n"
         f"Rarity: {RARITY_EMOJIS[rarity]} {rarity}"
     )
 
 
-def levels(update: Update, context: CallbackContext) -> None:
-    """Handles the /levels command."""
-    top_users = list(users_collection.find().sort("coins", -1).limit(10))
-    leaderboard = "\n".join(
-        [f"{i+1}. {user['username'] or user['user_id']} - {user['coins']} coins"
-         for i, user in enumerate(top_users)]
-    )
-    update.message.reply_text(f"🏆 **Top 10 Users:**\n{leaderboard}")
-
-
-def addsudo(update: Update, context: CallbackContext) -> None:
-    """Handles the /addsudo command."""
-    user_id = update.message.from_user.id
-    if user_id != OWNER_ID:
-        update.message.reply_text("❌ You are not authorized to use this command.")
-        return
-    if len(context.args) < 1:
-        update.message.reply_text("⚠️ Usage: /addsudo <user_id>")
-        return
-
-    sudo_user = int(context.args[0])
-    sudo_users.append(sudo_user)
-    update.message.reply_text(f"✅ User {sudo_user} added as sudo user.")
-
-
-def handle_message(update: Update, context: CallbackContext) -> None:
+async def handle_message(update: Update, context: CallbackContext) -> None:
     """Handles user messages and the character guessing game."""
     user_id = update.message.from_user.id
     username = update.message.from_user.username
@@ -174,13 +148,12 @@ def handle_message(update: Update, context: CallbackContext) -> None:
         if character:
             rarity_emoji = RARITY_EMOJIS.get(character["rarity"], "❓")
             current_characters[user_id] = character["name"]
-            update.message.reply_photo(
+            await update.message.reply_photo(
                 photo=character["image_url"],
                 caption=f"🎉 **Guess the Character!**\nRarity: {rarity_emoji} {character['rarity']}",
-                parse_mode="Markdown",
             )
         else:
-            update.message.reply_text("⚠️ No characters available in the database.")
+            await update.message.reply_text("⚠️ No characters available in the database.")
         return
 
     # Check if the user guessed correctly
@@ -197,23 +170,19 @@ def handle_message(update: Update, context: CallbackContext) -> None:
                     {"user_id": user_id},
                     {"$set": {"username": username}, "$inc": {"coins": 100}}
                 )
-            update.message.reply_text("🎉 Correct! You earned 100 coins! 💰")
+            await update.message.reply_text("🎉 Correct! You earned 100 coins! 💰")
 
 
 def main():
-    updater = Updater(BOT_TOKEN, use_context=True)
-    dispatcher = updater.dispatcher
+    application = Application.builder().token(BOT_TOKEN).build()
 
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CommandHandler("help", help_command))
-    dispatcher.add_handler(CommandHandler("stats", stats))
-    dispatcher.add_handler(CommandHandler("upload", upload))
-    dispatcher.add_handler(CommandHandler("levels", levels))
-    dispatcher.add_handler(CommandHandler("addsudo", addsudo))
-    dispatcher.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("stats", stats))
+    application.add_handler(CommandHandler("upload", upload))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    updater.start_polling()
-    updater.idle()
+    application.run_polling()
 
 
 if __name__ == "__main__":
