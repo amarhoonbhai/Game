@@ -129,7 +129,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     logger.info(f"User {user.id} ({user.first_name}) started the bot.")
     await update.message.reply_text(
-        "🎉 **Welcome to the Anime Guessing Bot!** 🎉\n\n"
+        "🎉 **Welcome to the Philo Guessing Bot!** 🎉\n\n"
         "⦿ **Type a character's name to guess and earn $10 for each correct guess!** 💵\n\n"
         "✨ Have fun playing! ✨",
         parse_mode=ParseMode.MARKDOWN
