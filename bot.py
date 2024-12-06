@@ -1,7 +1,6 @@
 import os
 import random
 import logging
-from time import time
 from collections import Counter
 from dotenv import load_dotenv
 from pymongo import MongoClient
@@ -71,7 +70,7 @@ class Game:
         return character_cache.pop() if character_cache else None
 
     @staticmethod
-    def update_user_balance_and_streak(user_id, first_name, last_name, correct_guess=True):
+    def update_user_balance_and_streak(user_id, first_name, last_name, correct_guess):
         """Update user balance and streak in the database."""
         user = users_collection.find_one({"user_id": user_id})
         if user:
@@ -124,78 +123,59 @@ class Game:
                 logger.error(f"Error broadcasting to {user['user_id']}: {e}")
 
 
-async def add_sudo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Add a sudo user (owner only)."""
+async def show_random_character(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
+    """Display a random character in the chat."""
+    global current_character
+    current_character = Game.fetch_random_character()
+    if not current_character:
+        current_character = {"name": "Unknown", "rarity": "Unknown", "image_url": "https://via.placeholder.com/500"}
+    await context.bot.send_photo(
+        chat_id=chat_id,
+        photo=current_character["image_url"],
+        caption=(
+            f"📢 **Guess the Character!** 📢\n\n"
+            f"⦿ **Rarity:** {current_character['rarity']}\n\n"
+            "🔥 **Can you guess their name? Type it in the chat!** 🔥"
+        ),
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+
+async def guess_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle user guesses and enforce streak/threshold logic."""
+    global current_character
+
     user_id = update.effective_user.id
-    if Game.is_owner(user_id):
-        try:
-            target_user_id = int(context.args[0])
-            Game.add_sudo_user(target_user_id)
-            await update.message.reply_text(
-                f"✅ **User {target_user_id} has been added as a sudo user.**",
-                parse_mode=ParseMode.MARKDOWN,
-            )
-        except (IndexError, ValueError):
-            await update.message.reply_text(
-                "⚠️ **Usage:** /addsudo <user_id>\n\n"
-                "⦿ Provide the Telegram user ID of the person to be added as sudo.",
-                parse_mode=ParseMode.MARKDOWN,
-            )
-    else:
+    first_name = update.effective_user.first_name
+    last_name = update.effective_user.last_name or ""
+    user_message_count[user_id] += 1
+
+    # Check if character exists
+    if not current_character:
+        await show_random_character(context, update.effective_chat.id)
+        return
+
+    guess = update.message.text.strip().lower()
+    character_name = current_character["name"].lower()
+
+    if guess in character_name:
+        # Correct guess: Update balance and streak, then show new character
+        balance_increment, new_streak = Game.update_user_balance_and_streak(
+            user_id, first_name, last_name, correct_guess=True
+        )
         await update.message.reply_text(
-            "❌ **You are not authorized to use this command.**",
+            f"🎉 **Correct!** You guessed **{current_character['name']}**.\n"
+            f"💵 **You earned ${balance_increment}!**\n"
+            f"🔥 **Streak: {new_streak}**",
             parse_mode=ParseMode.MARKDOWN,
         )
-
-
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send a broadcast message (owner only)."""
-    user_id = update.effective_user.id
-    if Game.is_owner(user_id):
-        try:
-            message = " ".join(context.args)
-            if not message:
-                await update.message.reply_text(
-                    "⚠️ **Usage:** /broadcast <message>\n\n"
-                    "⦿ Provide the message you want to broadcast to all users.",
-                    parse_mode=ParseMode.MARKDOWN,
-                )
-                return
-
-            Game.broadcast_message(context.bot, message)
-            await update.message.reply_text(
-                "✅ **Broadcast sent to all users.**",
-                parse_mode=ParseMode.MARKDOWN,
-            )
-        except Exception as e:
-            logger.error(f"Error during broadcast: {e}")
-            await update.message.reply_text(
-                "❌ **Failed to send the broadcast.**",
-                parse_mode=ParseMode.MARKDOWN,
-            )
-    else:
-        await update.message.reply_text(
-            "❌ **You are not authorized to use this command.**",
-            parse_mode=ParseMode.MARKDOWN,
-        )
-
-
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show bot statistics (owner only)."""
-    user_id = update.effective_user.id
-    if Game.is_owner(user_id):
-        total_users, total_characters = Game.get_bot_stats()
-        await update.message.reply_text(
-            f"📊 **Bot Statistics** 📊\n\n"
-            f"👤 **Total Users:** {total_users}\n"
-            f"🎭 **Total Characters:** {total_characters}\n",
-            parse_mode=ParseMode.MARKDOWN,
-        )
-    else:
-        await update.message.reply_text(
-            "❌ **You are not authorized to use this command.**",
-            parse_mode=ParseMode.MARKDOWN,
-        )
+        user_message_count[user_id] = 0  # Reset message counter on correct guess
+        await show_random_character(context, update.effective_chat.id)
+    elif user_message_count[user_id] >= 5:
+        # Show a new character after 5 messages
+        Game.update_user_balance_and_streak(user_id, first_name, last_name, correct_guess=False)  # Reset streak
+        user_message_count[user_id] = 0  # Reset message counter after threshold
+        await show_random_character(context, update.effective_chat.id)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -211,6 +191,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔥 **Let's start the game! Good luck!** 🔥",
         parse_mode=ParseMode.MARKDOWN
     )
+    await show_random_character(context, update.effective_chat.id)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -297,45 +278,78 @@ async def currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ **Failed to fetch leaderboard.**", parse_mode=ParseMode.MARKDOWN)
 
 
-async def guess_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle user guesses."""
-    global current_character
-
+async def add_sudo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Add a sudo user (owner only)."""
     user_id = update.effective_user.id
-    first_name = update.effective_user.first_name
-    last_name = update.effective_user.last_name or ""
-    user_message_count[user_id] += 1
-
-    # Check if character exists
-    if not current_character:
-        current_character = Game.fetch_random_character()
-        if not current_character:
-            await update.message.reply_text("⚠️ No characters available for guessing.")
-            return
-
-    guess = update.message.text.strip().lower()
-    character_name = current_character["name"].lower()
-
-    if guess in character_name:
-        # Correct guess: Update balance and streak
-        balance_increment, new_streak = Game.update_user_balance_and_streak(
-            user_id, first_name, last_name, correct_guess=True
-        )
+    if Game.is_owner(user_id):
+        try:
+            target_user_id = int(context.args[0])
+            Game.add_sudo_user(target_user_id)
+            await update.message.reply_text(
+                f"✅ **User {target_user_id} has been added as a sudo user.**",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+        except (IndexError, ValueError):
+            await update.message.reply_text(
+                "⚠️ **Usage:** /addsudo <user_id>\n\n"
+                "⦿ Provide the Telegram user ID of the person to be added as sudo.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+    else:
         await update.message.reply_text(
-            f"🎉 **Correct!** You guessed **{current_character['name']}**.\n"
-            f"💵 **You earned ${balance_increment}!**\n"
-            f"🔥 **Streak: {new_streak}**",
+            "❌ **You are not authorized to use this command.**",
             parse_mode=ParseMode.MARKDOWN,
         )
-        current_character = Game.fetch_random_character()
-    elif user_message_count[user_id] >= 5:
-        # Too many incorrect guesses: Reset streak and show a new character
-        Game.update_user_balance_and_streak(user_id, first_name, last_name, correct_guess=False)
-        user_message_count[user_id] = 0
-        current_character = Game.fetch_random_character()
-        await update.message.reply_text("❌ Too many incorrect guesses. Here's a new character.")
+
+
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send a broadcast message (owner only)."""
+    user_id = update.effective_user.id
+    if Game.is_owner(user_id):
+        try:
+            message = " ".join(context.args)
+            if not message:
+                await update.message.reply_text(
+                    "⚠️ **Usage:** /broadcast <message>\n\n"
+                    "⦿ Provide the message you want to broadcast to all users.",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                return
+
+            Game.broadcast_message(context.bot, message)
+            await update.message.reply_text(
+                "✅ **Broadcast sent to all users.**",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+        except Exception as e:
+            logger.error(f"Error during broadcast: {e}")
+            await update.message.reply_text(
+                "❌ **Failed to send the broadcast.**",
+                parse_mode=ParseMode.MARKDOWN,
+            )
     else:
-        await update.message.reply_text("❌ Incorrect guess. Try again!")
+        await update.message.reply_text(
+            "❌ **You are not authorized to use this command.**",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show bot statistics (owner only)."""
+    user_id = update.effective_user.id
+    if Game.is_owner(user_id):
+        total_users, total_characters = Game.get_bot_stats()
+        await update.message.reply_text(
+            f"📊 **Bot Statistics** 📊\n\n"
+            f"👤 **Total Users:** {total_users}\n"
+            f"🎭 **Total Characters:** {total_characters}\n",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    else:
+        await update.message.reply_text(
+            "❌ **You are not authorized to use this command.**",
+            parse_mode=ParseMode.MARKDOWN,
+        )
 
 
 # Main Application
@@ -345,11 +359,11 @@ def main():
     # Command Handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("upload", upload))
+    application.add_handler(CommandHandler("currency", currency))
     application.add_handler(CommandHandler("addsudo", add_sudo))
     application.add_handler(CommandHandler("broadcast", broadcast))
     application.add_handler(CommandHandler("stats", stats))
-    application.add_handler(CommandHandler("upload", upload))
-    application.add_handler(CommandHandler("currency", currency))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, guess_handler))
 
     application.run_polling()
