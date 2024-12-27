@@ -132,28 +132,23 @@ async def guess_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await show_random_character(context, update.effective_chat.id)
 
 
-# --- 🎭 Show Random Character ---
-async def show_random_character(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
-    global current_character
-    current_character = Game.fetch_random_character()
-    await context.bot.send_photo(
-        chat_id=chat_id,
-        photo=current_character.get("image_url", "https://via.placeholder.com/500"),
-        caption=(
-            f"🎭 **Guess the Character!**\n"
-            f"🔹 **Rarity:** {current_character.get('rarity', 'Unknown')}\n"
-            f"🔍 **Type your guess in the chat!**"
-        ),
-        parse_mode=ParseMode.MARKDOWN,
+# --- 📊 Stats Command ---
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not Game.is_admin(update.effective_user.id):
+        return await update.message.reply_text("❌ Unauthorized.")
+    total_users, total_characters = Game.get_bot_stats()
+    await update.message.reply_text(f"📊 **Users:** {total_users}\n🎭 **Characters:** {total_characters}")
+
+
+# --- 📸 Profile Command ---
+async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = users_collection.find_one({"user_id": update.effective_user.id}) or {}
+    await update.message.reply_text(
+        f"📊 **Profile:**\n💵 **Balance:** ${user.get('balance', 0)}\n🔥 **Streak:** {user.get('streak', 0)}"
     )
 
 
-# --- 🔑 Commands ---
-async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = users_collection.find_one({"user_id": update.effective_user.id}) or {}
-    await update.message.reply_text(f"📊 **Profile:**\n💵 **Balance:** ${user.get('balance', 0)}\n🔥 **Streak:** {user.get('streak', 0)}")
-
-
+# --- 🏆 Currency Command ---
 async def currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
     leaderboard = users_collection.find().sort("balance", -1).limit(10)
     response = "\n".join([f"{i+1}. {user['first_name']} – ${user['balance']}" for i, user in enumerate(leaderboard)])
