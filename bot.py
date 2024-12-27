@@ -25,7 +25,7 @@ users_collection = db["users"]
 characters_collection = db["characters"]
 sudo_users_collection = db["sudo_users"]
 
-# Enhanced rarities with probabilities
+# Rarities
 RARITIES = [
     ("❖ Common 🌱", 60),
     ("❖ Uncommon 🌿", 20),
@@ -35,23 +35,21 @@ RARITIES = [
     ("❖ Mythical 🔥", 2),
 ]
 
-# Logging setup
+# Logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
 
-# Game state
+# Game State
 character_cache = []
 current_character = None
 user_message_count = Counter()
 
 
-# --- Game Class ---
+# --- Game Logic ---
 class Game:
-    """Encapsulates game logic and utility methods."""
-
     @staticmethod
     def assign_rarity():
         total_weight = sum(weight for _, weight in RARITIES)
@@ -101,7 +99,7 @@ class Game:
 
 
 # --- Profile Image Generation ---
-def generate_enhanced_profile_image(user_data):
+def generate_profile_image(user_data):
     bg_color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
     img = Image.new("RGB", (600, 500), color=bg_color)
     draw = ImageDraw.Draw(img)
@@ -127,7 +125,7 @@ def generate_enhanced_profile_image(user_data):
     profile_img = Image.composite(profile_img, Image.new("RGB", (200, 200)), mask)
 
     img.paste(profile_img, (200, 100), mask=mask)
-    draw.text((150, 320), f"❖ Name: {user_data['first_name']} {user_data['last_name']}", font=font_text, fill=text_color)
+    draw.text((150, 320), f"❖ Name: {user_data['first_name']}", font=font_text, fill=text_color)
     draw.text((150, 360), f"❖ Rank: {user_data['rank']}", font=font_text, fill=text_color)
     draw.text((150, 400), f"❖ Balance: ${user_data['balance']}", font=font_text, fill=text_color)
     draw.text((150, 440), f"❖ Streak: {user_data['streak']}", font=font_text, fill=text_color)
@@ -141,27 +139,14 @@ def generate_enhanced_profile_image(user_data):
 # --- Commands ---
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = users_collection.find_one({"user_id": update.effective_user.id})
-    if not user:
-        user = {"first_name": update.effective_user.first_name, "last_name": "", "rank": "Unranked", "balance": 0, "streak": 0}
-    buffer = generate_enhanced_profile_image(user)
+    buffer = generate_profile_image(user or {"first_name": "User", "rank": "Unranked", "balance": 0, "streak": 0})
     await update.message.reply_photo(photo=buffer, caption="❖ *Your Profile* ❖", parse_mode=ParseMode.MARKDOWN)
 
-
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not Game.is_owner(update.effective_user.id):
-        await update.message.reply_text("❌ Unauthorized.")
-        return
-    for user in users_collection.find():
-        await context.bot.send_message(user['user_id'], " ".join(context.args))
-        time.sleep(0.5)
-
-
-# --- Main ---
+# Run Application
 def main():
-    application = Application.builder().token(BOT_TOKEN).build()
-    application.add_handler(CommandHandler("profile", profile))
-    application.add_handler(CommandHandler("broadcast", broadcast))
-    application.run_polling()
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("profile", profile))
+    app.run_polling()
 
 
 if __name__ == "__main__":
