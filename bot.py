@@ -1,54 +1,54 @@
 import os
 import random
 import logging
-import time
-from collections import Counter
 from dotenv import load_dotenv
 from pymongo import MongoClient
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from PIL import Image, ImageDraw, ImageFont
-import io
+import requests
+from io import BytesIO
+from collections import defaultdict
 
-# --- Environment and Database Setup ---
+# --- ✅ Environment Setup ---
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID = int(os.getenv("OWNER_ID"))
 MONGO_URI = os.getenv("MONGO_URI")
 CHARACTER_CHANNEL_ID = -1002438449944
 
-# MongoDB setup
+# --- ✅ MongoDB Setup ---
 client = MongoClient(MONGO_URI)
 db = client["anime_bot"]
 users_collection = db["users"]
 characters_collection = db["characters"]
 sudo_users_collection = db["sudo_users"]
 
-# Rarities
+# --- ✅ Rarity Settings ---
 RARITIES = [
-    ("❖ Common 🌱", 60),
-    ("❖ Uncommon 🌿", 20),
-    ("❖ Rare 🌟", 10),
-    ("❖ Epic 🌠", 5),
-    ("❖ Legendary 🏆", 3),
-    ("❖ Mythical 🔥", 2),
+    ("Common 🌱", 60),
+    ("Uncommon 🌿", 20),
+    ("Rare 🌟", 10),
+    ("Epic 🌠", 5),
+    ("Legendary 🏆", 3),
+    ("Mythical 🔥", 2),
 ]
 
-# Logging
+# --- ✅ Logging ---
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
 
-# Game State
+# --- ✅ Game State ---
 character_cache = []
 current_character = None
-user_message_count = Counter()
+user_incorrect_guesses = defaultdict(int)
 
 
-# --- Game Logic ---
+# --- 🛠️ Game Logic ---
 class Game:
     @staticmethod
     def assign_rarity():
@@ -59,7 +59,7 @@ class Game:
             cumulative += weight
             if choice <= cumulative:
                 return rarity
-        return "❖ Common 🌱"
+        return "Common 🌱"
 
     @staticmethod
     def fetch_random_character():
@@ -69,84 +69,109 @@ class Game:
         return character_cache.pop() if character_cache else None
 
     @staticmethod
-    def update_user_balance_and_streak(user_id, first_name, last_name, correct_guess):
+    def update_user_balance_and_streak(user_id, first_name, last_name):
         user = users_collection.find_one({"user_id": user_id})
         if user:
-            if correct_guess:
-                new_streak = user.get("streak", 0) + 1
-                balance_increment = 10 + (new_streak * 2)
-                users_collection.update_one(
-                    {"user_id": user_id},
-                    {"$inc": {"balance": balance_increment}, "$set": {"streak": new_streak}},
-                )
-                return balance_increment, new_streak
-            else:
-                users_collection.update_one({"user_id": user_id}, {"$set": {"streak": 0}})
-                return 0, 0
+            new_streak = user.get("streak", 0) + 1
+            balance_increment = 10 + (new_streak * 2)
+            users_collection.update_one(
+                {"user_id": user_id},
+                {"$inc": {"balance": balance_increment}, "$set": {"streak": new_streak}},
+            )
+            return balance_increment, new_streak
         else:
             users_collection.insert_one(
                 {"user_id": user_id, "first_name": first_name, "last_name": last_name, "balance": 0, "streak": 0}
             )
-            return 0, 0
-
-    @staticmethod
-    def get_user_currency():
-        return list(users_collection.find().sort("balance", -1).limit(10))
+            return 10, 1
 
     @staticmethod
     def is_owner(user_id):
         return user_id == OWNER_ID
 
+    @staticmethod
+    def is_admin(user_id):
+        return Game.is_owner(user_id) or sudo_users_collection.find_one({"user_id": user_id})
 
-# --- Profile Image Generation ---
-def generate_profile_image(user_data):
-    bg_color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
-    img = Image.new("RGB", (600, 500), color=bg_color)
-    draw = ImageDraw.Draw(img)
-
-    try:
-        font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf", 36)
-        font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf", 22)
-    except:
-        font_title = ImageFont.load_default()
-        font_text = ImageFont.load_default()
-
-    text_color = (255, 255, 255) if sum(bg_color) / 3 < 128 else (0, 0, 0)
-    draw.text((230, 20), "❖ *Profile* ❖", font=font_title, fill=text_color)
-
-    profile_img = Image.new("RGB", (200, 200), color=(255, 255, 255))
-    draw_profile = ImageDraw.Draw(profile_img)
-    initials = f"{user_data['first_name'][0]}{user_data['last_name'][0]}"
-    draw_profile.text((70, 90), initials, font=font_text, fill=(0, 0, 0))
-
-    mask = Image.new("L", (200, 200), 0)
-    draw_mask = ImageDraw.Draw(mask)
-    draw_mask.ellipse((0, 0, 200, 200), fill=255)
-    profile_img = Image.composite(profile_img, Image.new("RGB", (200, 200)), mask)
-
-    img.paste(profile_img, (200, 100), mask=mask)
-    draw.text((150, 320), f"❖ Name: {user_data['first_name']}", font=font_text, fill=text_color)
-    draw.text((150, 360), f"❖ Rank: {user_data['rank']}", font=font_text, fill=text_color)
-    draw.text((150, 400), f"❖ Balance: ${user_data['balance']}", font=font_text, fill=text_color)
-    draw.text((150, 440), f"❖ Streak: {user_data['streak']}", font=font_text, fill=text_color)
-
-    buffer = io.BytesIO()
-    img.save(buffer, format="PNG")
-    buffer.seek(0)
-    return buffer
+    @staticmethod
+    def get_bot_stats():
+        total_users = users_collection.count_documents({})
+        total_characters = characters_collection.count_documents({})
+        return total_users, total_characters
 
 
-# --- Commands ---
+# --- 🎯 Guess Handler ---
+async def guess_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global current_character
+    user_id = update.effective_user.id
+    first_name = update.effective_user.first_name
+    last_name = update.effective_user.last_name or ""
+
+    if not current_character:
+        await show_random_character(context, update.effective_chat.id)
+        return
+
+    guess = update.message.text.strip().lower()
+    character_name = current_character["name"].lower()
+
+    if any(word in character_name for word in guess.split()):
+        balance_increment, new_streak = Game.update_user_balance_and_streak(user_id, first_name, last_name)
+        user_incorrect_guesses[user_id] = 0
+        await update.message.reply_text(
+            f"🎉 **Correct!** The character was **{current_character['name']}**.\n"
+            f"💵 **You earned ${balance_increment}!**\n"
+            f"🔥 **Streak: {new_streak}**",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        await show_random_character(context, update.effective_chat.id)
+    else:
+        user_incorrect_guesses[user_id] += 1
+        if user_incorrect_guesses[user_id] >= 3:
+            user_incorrect_guesses[user_id] = 0
+            await update.message.reply_text("🔄 **Switching to a new character after too many incorrect guesses!**")
+            await show_random_character(context, update.effective_chat.id)
+
+
+# --- 🎭 Show Random Character ---
+async def show_random_character(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
+    global current_character
+    current_character = Game.fetch_random_character()
+    await context.bot.send_photo(
+        chat_id=chat_id,
+        photo=current_character.get("image_url", "https://via.placeholder.com/500"),
+        caption=(
+            f"🎭 **Guess the Character!**\n"
+            f"🔹 **Rarity:** {current_character.get('rarity', 'Unknown')}\n"
+            f"🔍 **Type your guess in the chat!**"
+        ),
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+
+# --- 🔑 Commands ---
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = users_collection.find_one({"user_id": update.effective_user.id})
-    buffer = generate_profile_image(user or {"first_name": "User", "rank": "Unranked", "balance": 0, "streak": 0})
-    await update.message.reply_photo(photo=buffer, caption="❖ *Your Profile* ❖", parse_mode=ParseMode.MARKDOWN)
+    user = users_collection.find_one({"user_id": update.effective_user.id}) or {}
+    await update.message.reply_text(f"📊 **Profile:**\n💵 **Balance:** ${user.get('balance', 0)}\n🔥 **Streak:** {user.get('streak', 0)}")
 
-# Run Application
+
+async def currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    leaderboard = users_collection.find().sort("balance", -1).limit(10)
+    response = "\n".join([f"{i+1}. {user['first_name']} – ${user['balance']}" for i, user in enumerate(leaderboard)])
+    await update.message.reply_text(f"🏆 **Top Players:**\n{response}")
+
+
+# --- 🚀 Main Bot Application ---
 def main():
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("profile", profile))
-    app.run_polling()
+    application = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("profile", profile))
+    application.add_handler(CommandHandler("currency", currency))
+    application.add_handler(CommandHandler("stats", stats))
+    application.add_handler(CommandHandler("addsudo", addsudo))
+    application.add_handler(CommandHandler("broadcast", broadcast))
+    application.add_handler(CommandHandler("upload", upload))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, guess_handler))
+    application.run_polling()
 
 
 if __name__ == "__main__":
