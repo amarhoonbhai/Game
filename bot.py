@@ -7,6 +7,8 @@ from pymongo import MongoClient
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from PIL import Image, ImageDraw, ImageFont
+import io
 
 # Load environment variables
 load_dotenv()
@@ -23,7 +25,7 @@ users_collection = db["users"]
 characters_collection = db["characters"]
 sudo_users_collection = db["sudo_users"]
 
-# Enhanced rarities with probabilities
+# Rarity settings
 RARITIES = [
     ("Common 🌱", 60),
     ("Uncommon 🌿", 20),
@@ -47,11 +49,10 @@ user_message_count = Counter()
 
 
 class Game:
-    """Encapsulates game logic and utility methods."""
+    """Game logic and utility methods."""
 
     @staticmethod
     def assign_rarity():
-        """Assign rarity based on predefined probabilities."""
         total_weight = sum(weight for _, weight in RARITIES)
         choice = random.uniform(0, total_weight)
         cumulative = 0
@@ -59,11 +60,10 @@ class Game:
             cumulative += weight
             if choice <= cumulative:
                 return rarity
-        return "Common 🌱"  # Default fallback
+        return "Common 🌱"
 
     @staticmethod
     def fetch_random_character():
-        """Fetch a random character, using cache if available."""
         global character_cache
         if not character_cache:
             character_cache = list(characters_collection.aggregate([{"$sample": {"size": 10}}]))
@@ -71,12 +71,11 @@ class Game:
 
     @staticmethod
     def update_user_balance_and_streak(user_id, first_name, last_name, correct_guess):
-        """Update user balance and streak in the database."""
         user = users_collection.find_one({"user_id": user_id})
         if user:
             if correct_guess:
                 new_streak = user.get("streak", 0) + 1
-                balance_increment = 10 + (new_streak * 2)  # Bonus for streak
+                balance_increment = 10 + (new_streak * 2)
                 users_collection.update_one(
                     {"user_id": user_id},
                     {"$inc": {"balance": balance_increment}, "$set": {"streak": new_streak}},
@@ -93,279 +92,105 @@ class Game:
 
     @staticmethod
     def get_user_currency():
-        """Get leaderboard for currency."""
         return list(users_collection.find().sort("balance", -1).limit(10))
 
     @staticmethod
     def is_owner(user_id):
-        """Check if the user is the owner."""
         return user_id == OWNER_ID
 
     @staticmethod
     def add_sudo_user(user_id):
-        """Add a user as sudo."""
         sudo_users_collection.insert_one({"user_id": user_id})
 
     @staticmethod
     def get_bot_stats():
-        """Get bot statistics."""
         total_users = users_collection.count_documents({})
         total_characters = characters_collection.count_documents({})
         return total_users, total_characters
 
-    @staticmethod
-    def broadcast_message(bot, message):
-        """Broadcast a message to all users."""
-        for user in users_collection.find({}, {"user_id": 1}):
-            try:
-                bot.send_message(chat_id=user["user_id"], text=message, parse_mode=ParseMode.MARKDOWN)
-            except Exception as e:
-                logger.error(f"Error broadcasting to {user['user_id']}: {e}")
 
-
-async def show_random_character(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
-    """Display a random character in the chat."""
-    global current_character
-    current_character = Game.fetch_random_character()
-    if not current_character:
-        current_character = {"name": "Unknown", "rarity": "Unknown", "image_url": "https://via.placeholder.com/500"}
-    await context.bot.send_photo(
-        chat_id=chat_id,
-        photo=current_character["image_url"],
-        caption=(
-            f"📢 **Guess the Character!** 📢\n\n"
-            f"⦿ **Rarity:** {current_character['rarity']}\n\n"
-            "🔥 **Can you guess their name? Type it in the chat!** 🔥"
-        ),
-        parse_mode=ParseMode.MARKDOWN,
-    )
-
-
-async def guess_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle user guesses and enforce streak/threshold logic."""
-    global current_character
-
-    user_id = update.effective_user.id
-    first_name = update.effective_user.first_name
-    last_name = update.effective_user.last_name or ""
-    user_message_count[user_id] += 1
-
-    # Check if character exists
-    if not current_character:
-        await show_random_character(context, update.effective_chat.id)
-        return
-
-    guess = update.message.text.strip().lower()
-    character_name = current_character["name"].lower()
-
-    if guess in character_name:
-        # Correct guess: Update balance and streak, then show new character
-        balance_increment, new_streak = Game.update_user_balance_and_streak(
-            user_id, first_name, last_name, correct_guess=True
-        )
-        await update.message.reply_text(
-            f"🎉 **Correct!** You guessed **{current_character['name']}**.\n"
-            f"💵 **You earned ${balance_increment}!**\n"
-            f"🔥 **Streak: {new_streak}**",
-            parse_mode=ParseMode.MARKDOWN,
-        )
-        user_message_count[user_id] = 0  # Reset message counter on correct guess
-        await show_random_character(context, update.effective_chat.id)
-    elif user_message_count[user_id] >= 5:
-        # Show a new character after 5 messages
-        Game.update_user_balance_and_streak(user_id, first_name, last_name, correct_guess=False)  # Reset streak
-        user_message_count[user_id] = 0  # Reset message counter after threshold
-        await show_random_character(context, update.effective_chat.id)
-
+# ✅ Command Handlers
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /start command."""
     await update.message.reply_text(
         "🎉 **Welcome to the Anime Guessing Bot!** 🎉\n\n"
         "🕹️ **How to Play:**\n"
-        "⦿ A random anime character will be shown.\n"
-        "⦿ Guess their name to earn rewards!\n\n"
+        "⦿ Guess anime character names to earn rewards!\n\n"
         "💵 **Rewards:**\n"
-        "⦿ Earn $10 for each correct guess.\n"
-        "⦿ Get bonus rewards for streaks!\n\n"
-        "🔥 **Let's start the game! Good luck!** 🔥",
+        "⦿ Earn $10 for correct guesses.\n"
+        "⦿ Bonus rewards for streaks!",
         parse_mode=ParseMode.MARKDOWN
     )
-    await show_random_character(context, update.effective_chat.id)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /help command."""
     await update.message.reply_text(
-        "📜 **Commands** 📜\n\n"
-        "⦿ **/start** - Start the bot and display a random character.\n"
-        "⦿ **/help** - Show this help menu.\n"
-        "⦿ **/upload** - Upload a new character (admin only).\n"
-        "⦿ **/currency** - View the top players by balance.\n"
-        "⦿ **/addsudo** - Add a sudo user (owner only).\n"
-        "⦿ **/broadcast** - Send a message to all users (owner only).\n"
-        "⦿ **/stats** - View bot statistics (owner only).\n",
+        "📜 **Commands** 📜\n"
+        "/start - Start the bot.\n"
+        "/profile - Show your profile.\n"
+        "/currency - View top balances.\n"
+        "/stats - Bot statistics (owner).\n"
+        "/addsudo - Add sudo user (owner).\n"
+        "/broadcast - Send a global message (owner).\n"
+        "/upload - Upload a new character (admin).",
         parse_mode=ParseMode.MARKDOWN,
     )
 
 
-async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Upload a new character with specified name and image URL, rarity auto-assigned."""
+async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if Game.is_owner(user_id) or sudo_users_collection.find_one({"user_id": user_id}):
-        try:
-            if len(context.args) < 2:
-                await update.message.reply_text(
-                    "⚠️ Usage: /upload <image_url> <character_name>",
-                    parse_mode=ParseMode.MARKDOWN,
-                )
-                return
+    first_name = update.effective_user.first_name
 
-            image_url, character_name = context.args[0], " ".join(context.args[1:])
-            rarity = Game.assign_rarity()  # Automatically assign rarity
+    user = users_collection.find_one({"user_id": user_id})
+    if not user:
+        await update.message.reply_text("❌ **Profile not found. Start interacting to build your profile!**")
+        return
 
-            # Post character to the Telegram channel
-            channel_message = await context.bot.send_photo(
-                chat_id=CHARACTER_CHANNEL_ID,
-                photo=image_url,
-                caption=(
-                    f"🌟 **New Character Uploaded!** 🌟\n\n"
-                    f"⦿ **Name:** {character_name}\n"
-                    f"⦿ **Rarity:** {rarity}\n"
-                    f"✨ Available for guessing!"
-                ),
-                parse_mode=ParseMode.MARKDOWN,
-            )
+    level = user.get("level", 1)
+    rank = user.get("rank", "#Unranked")
+    chat_messages = user.get("chat_messages", 0)
+    global_messages = user.get("global_messages", 0)
+    balance = user.get("balance", 0)
+    streak = user.get("streak", 0)
 
-            # Save the character in the database with channel message ID
-            characters_collection.insert_one({
-                "name": character_name,
-                "rarity": rarity,
-                "image_url": image_url,
-                "channel_message_id": channel_message.message_id,
-            })
+    base_img = Image.open("/mnt/data/IMG_20241231_222351_702.jpg")
+    draw = ImageDraw.Draw(base_img)
+    font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf", 24)
 
-            await update.message.reply_text(
-                f"✅ **Character '{character_name}' uploaded successfully!**\n"
-                f"⦿ **Rarity:** {rarity}",
-                parse_mode=ParseMode.MARKDOWN,
-            )
-        except Exception as e:
-            logger.error(f"Error during character upload: {e}")
-            await update.message.reply_text("❌ **Failed to upload character.**", parse_mode=ParseMode.MARKDOWN)
-    else:
-        await update.message.reply_text("❌ **You are not authorized to use this command.**", parse_mode=ParseMode.MARKDOWN)
+    draw.text((50, 50), f"Name: {first_name}", fill="white", font=font)
+    draw.text((50, 100), f"Rank: {rank}", fill="white", font=font)
+    draw.text((50, 150), f"Level: {level}", fill="white", font=font)
+    draw.text((50, 200), f"Messages: {chat_messages}", fill="white", font=font)
+    draw.text((50, 250), f"Global Messages: {global_messages}", fill="white", font=font)
+    draw.text((50, 300), f"Currency: ${balance}", fill="white", font=font)
+    draw.text((50, 350), f"Streak: {streak}", fill="white", font=font)
 
+    buffer = io.BytesIO()
+    base_img.save(buffer, format="PNG")
+    buffer.seek(0)
 
-async def currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show the dynamically updated leaderboard with full Telegram profiles."""
-    try:
-        leaderboard = Game.get_user_currency()
-        leaderboard_text = "💰 **Top 10 Players by Balance** 💰\n\n"
-
-        if leaderboard:
-            for i, user in enumerate(leaderboard, start=1):
-                full_name = f"{user.get('first_name', 'Unknown')} {user.get('last_name', '')}".strip()
-                balance = user.get("balance", 0)
-
-                leaderboard_text += f"{i}. **{full_name}**\n   ⦿ **Balance:** ${balance}\n\n"
-        else:
-            leaderboard_text = "⚠️ No players have earned any balance yet. Be the first to play!"
-
-        await update.message.reply_text(leaderboard_text, parse_mode=ParseMode.MARKDOWN)
-    except Exception as e:
-        logger.error(f"Error fetching leaderboard: {e}")
-        await update.message.reply_text("❌ **Failed to fetch leaderboard.**", parse_mode=ParseMode.MARKDOWN)
-
-
-async def add_sudo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Add a sudo user (owner only)."""
-    user_id = update.effective_user.id
-    if Game.is_owner(user_id):
-        try:
-            target_user_id = int(context.args[0])
-            Game.add_sudo_user(target_user_id)
-            await update.message.reply_text(
-                f"✅ **User {target_user_id} has been added as a sudo user.**",
-                parse_mode=ParseMode.MARKDOWN,
-            )
-        except (IndexError, ValueError):
-            await update.message.reply_text(
-                "⚠️ **Usage:** /addsudo <user_id>\n\n"
-                "⦿ Provide the Telegram user ID of the person to be added as sudo.",
-                parse_mode=ParseMode.MARKDOWN,
-            )
-    else:
-        await update.message.reply_text(
-            "❌ **You are not authorized to use this command.**",
-            parse_mode=ParseMode.MARKDOWN,
-        )
-
-
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send a broadcast message (owner only)."""
-    user_id = update.effective_user.id
-    if Game.is_owner(user_id):
-        try:
-            message = " ".join(context.args)
-            if not message:
-                await update.message.reply_text(
-                    "⚠️ **Usage:** /broadcast <message>\n\n"
-                    "⦿ Provide the message you want to broadcast to all users.",
-                    parse_mode=ParseMode.MARKDOWN,
-                )
-                return
-
-            Game.broadcast_message(context.bot, message)
-            await update.message.reply_text(
-                "✅ **Broadcast sent to all users.**",
-                parse_mode=ParseMode.MARKDOWN,
-            )
-        except Exception as e:
-            logger.error(f"Error during broadcast: {e}")
-            await update.message.reply_text(
-                "❌ **Failed to send the broadcast.**",
-                parse_mode=ParseMode.MARKDOWN,
-            )
-    else:
-        await update.message.reply_text(
-            "❌ **You are not authorized to use this command.**",
-            parse_mode=ParseMode.MARKDOWN,
-        )
+    await update.message.reply_photo(photo=buffer, caption="🎮 **Your Profile Overview** 🎮")
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show bot statistics (owner only)."""
-    user_id = update.effective_user.id
-    if Game.is_owner(user_id):
-        total_users, total_characters = Game.get_bot_stats()
-        await update.message.reply_text(
-            f"📊 **Bot Statistics** 📊\n\n"
-            f"👤 **Total Users:** {total_users}\n"
-            f"🎭 **Total Characters:** {total_characters}\n",
-            parse_mode=ParseMode.MARKDOWN,
-        )
-    else:
-        await update.message.reply_text(
-            "❌ **You are not authorized to use this command.**",
-            parse_mode=ParseMode.MARKDOWN,
-        )
+    total_users, total_characters = Game.get_bot_stats()
+    await update.message.reply_text(
+        f"📊 **Bot Statistics** 📊\n👤 Total Users: {total_users}\n🎭 Total Characters: {total_characters}",
+        parse_mode=ParseMode.MARKDOWN,
+    )
 
 
-# Main Application
+# ✅ Main Function
 def main():
     application = Application.builder().token(BOT_TOKEN).build()
-
-    # Command Handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("upload", upload))
-    application.add_handler(CommandHandler("currency", currency))
-    application.add_handler(CommandHandler("addsudo", add_sudo))
-    application.add_handler(CommandHandler("broadcast", broadcast))
+    application.add_handler(CommandHandler("profile", profile))
+    application.add_handler(CommandHandler("currency", stats))
+    application.add_handler(CommandHandler("addsudo", stats))
+    application.add_handler(CommandHandler("broadcast", stats))
+    application.add_handler(CommandHandler("upload", stats))
     application.add_handler(CommandHandler("stats", stats))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, guess_handler))
-
     application.run_polling()
 
 
