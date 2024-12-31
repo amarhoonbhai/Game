@@ -177,28 +177,38 @@ async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Unauthorized.", parse_mode=ParseMode.MARKDOWN)
         return
 
-    try:
-        if len(context.args) < 2:
-            await update.message.reply_text("⚠️ Usage: /upload <image_url> <character_name>")
-            return
+    if len(context.args) < 2:
+        await update.message.reply_text("⚠️ Usage: /upload <image_url> <character_name>")
+        return
 
-        image_url, character_name = context.args[0], " ".join(context.args[1:])
-        rarity = Game.assign_rarity()
-        await context.bot.send_photo(
-            chat_id=CHARACTER_CHANNEL_ID,
-            photo=image_url,
-            caption=f"🌟 **New Character Uploaded!**\n\n🛡️ **Name:** {character_name}\n🔥 **Rarity:** {rarity}",
-            parse_mode=ParseMode.MARKDOWN,
-        )
-        characters_collection.insert_one({
-            "name": character_name,
-            "rarity": rarity,
-            "image_url": image_url,
-        })
-        await update.message.reply_text(f"✅ Character **{character_name}** uploaded successfully!")
-    except Exception as e:
-        logger.error(f"Upload Error: {e}")
-        await update.message.reply_text("❌ Failed to upload character.")
+    image_url, character_name = context.args[0], " ".join(context.args[1:])
+    rarity = Game.assign_rarity()
+    characters_collection.insert_one({
+        "name": character_name,
+        "rarity": rarity,
+        "image_url": image_url,
+    })
+    await update.message.reply_text(f"✅ Character **{character_name}** uploaded successfully!")
+
+
+async def addsudo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not Game.is_owner(user_id):
+        await update.message.reply_text("❌ Unauthorized.", parse_mode=ParseMode.MARKDOWN)
+        return
+    target_user_id = int(context.args[0])
+    Game.add_sudo_user(target_user_id)
+    await update.message.reply_text(f"✅ User **{target_user_id}** added as sudo user.")
+
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    total_users, total_characters = Game.get_bot_stats()
+    await update.message.reply_text(
+        f"📊 **Bot Statistics:**\n"
+        f"👥 **Total Users:** {total_users}\n"
+        f"🎭 **Total Characters:** {total_characters}",
+        parse_mode=ParseMode.MARKDOWN,
+    )
 
 
 # ------------------------------
@@ -211,9 +221,9 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("upload", upload))
-    application.add_handler(CommandHandler("broadcast", broadcast))
-    application.add_handler(CommandHandler("stats", stats))
     application.add_handler(CommandHandler("currency", currency))
+    application.add_handler(CommandHandler("addsudo", addsudo))
+    application.add_handler(CommandHandler("stats", stats))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
 
     application.run_polling()
