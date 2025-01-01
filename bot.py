@@ -191,14 +191,25 @@ async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ Character **{character_name}** uploaded successfully!")
 
 
-async def addsudo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not Game.is_owner(user_id):
         await update.message.reply_text("❌ Unauthorized.", parse_mode=ParseMode.MARKDOWN)
         return
-    target_user_id = int(context.args[0])
-    Game.add_sudo_user(target_user_id)
-    await update.message.reply_text(f"✅ User **{target_user_id}** added as sudo user.")
+
+    message = " ".join(context.args)
+    success_count = 0
+    failed_count = 0
+    for user in users_collection.find({}, {"user_id": 1}):
+        try:
+            await context.bot.send_message(user["user_id"], message, parse_mode=ParseMode.MARKDOWN)
+            success_count += 1
+        except Exception:
+            failed_count += 1
+
+    await update.message.reply_text(
+        f"✅ Broadcast complete!\nSuccess: {success_count}, Failed: {failed_count}"
+    )
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -211,29 +222,19 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    leaderboard = Game.get_user_currency()
-    leaderboard_text = "\n".join(
-        f"{i+1}. {user.get('first_name', 'Unknown')} - 💰 {user.get('balance', 0)}"
-        for i, user in enumerate(leaderboard)
-    )
-    await update.message.reply_text(f"🏆 **Top Players:**\n{leaderboard_text}")
-
-
 # ------------------------------
 # Main Function
 # ------------------------------
 
 def main():
     application = Application.builder().token(BOT_TOKEN).build()
-
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("upload", upload))
     application.add_handler(CommandHandler("currency", currency))
     application.add_handler(CommandHandler("addsudo", addsudo))
+    application.add_handler(CommandHandler("broadcast", broadcast))
     application.add_handler(CommandHandler("stats", stats))
-
     application.run_polling()
 
 
