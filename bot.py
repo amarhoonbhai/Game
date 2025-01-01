@@ -193,18 +193,6 @@ async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ Character **{character_name}** uploaded successfully!")
 
 
-async def addsudo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Add a sudo user."""
-    user_id = update.effective_user.id
-    if not Game.is_owner(user_id):
-        await update.message.reply_text("❌ Unauthorized.", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    target_user_id = int(context.args[0])
-    Game.add_sudo_user(target_user_id)
-    await update.message.reply_text(f"✅ User **{target_user_id}** added as sudo user.")
-
-
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show bot statistics."""
     total_users, total_characters = Game.get_bot_stats()
@@ -214,6 +202,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🎭 **Total Characters:** {total_characters}",
         parse_mode=ParseMode.MARKDOWN,
     )
+
 
 # ------------------------------
 # Main Function
@@ -226,6 +215,7 @@ def main():
     application.add_handler(CommandHandler("upload", upload))
     application.add_handler(CommandHandler("currency", currency))
     application.add_handler(CommandHandler("addsudo", addsudo))
+    application.add_handler(CommandHandler("broadcast", broadcast))
     application.add_handler(CommandHandler("stats", stats))
     application.run_polling()
 
