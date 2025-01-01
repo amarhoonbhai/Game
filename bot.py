@@ -172,15 +172,32 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def addsudo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Add a sudo user (Owner Only)."""
+async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Upload a new character."""
     user_id = update.effective_user.id
-    if not Game.is_owner(user_id):
+    if not (Game.is_owner(user_id) or sudo_users_collection.find_one({"user_id": user_id})):
         await update.message.reply_text("❌ Unauthorized.", parse_mode=ParseMode.MARKDOWN)
         return
 
-    if len(context.args) != 1:
-        await update.message.reply_text("⚠️ Usage: /addsudo <user_id>")
+    if len(context.args) < 2:
+        await update.message.reply_text("⚠️ Usage: /upload <image_url> <character_name>")
+        return
+
+    image_url, character_name = context.args[0], " ".join(context.args[1:])
+    rarity = Game.assign_rarity()
+    characters_collection.insert_one({
+        "name": character_name,
+        "rarity": rarity,
+        "image_url": image_url,
+    })
+    await update.message.reply_text(f"✅ Character **{character_name}** uploaded successfully!")
+
+
+async def addsudo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Add a sudo user."""
+    user_id = update.effective_user.id
+    if not Game.is_owner(user_id):
+        await update.message.reply_text("❌ Unauthorized.", parse_mode=ParseMode.MARKDOWN)
         return
 
     target_user_id = int(context.args[0])
@@ -189,7 +206,7 @@ async def addsudo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Display bot statistics."""
+    """Show bot statistics."""
     total_users, total_characters = Game.get_bot_stats()
     await update.message.reply_text(
         f"📊 **Bot Statistics:**\n"
@@ -197,17 +214,6 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🎭 **Total Characters:** {total_characters}",
         parse_mode=ParseMode.MARKDOWN,
     )
-
-
-async def currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show top players by balance."""
-    leaderboard = Game.get_user_currency()
-    leaderboard_text = "\n".join(
-        f"{i+1}. {user.get('first_name', 'Unknown')} - 💰 {user.get('balance', 0)}"
-        for i, user in enumerate(leaderboard)
-    )
-    await update.message.reply_text(f"🏆 **Top Players:**\n{leaderboard_text}")
-
 
 # ------------------------------
 # Main Function
@@ -220,15 +226,9 @@ def main():
     application.add_handler(CommandHandler("upload", upload))
     application.add_handler(CommandHandler("currency", currency))
     application.add_handler(CommandHandler("addsudo", addsudo))
-    application.add_handler(CommandHandler("broadcast", broadcast))
     application.add_handler(CommandHandler("stats", stats))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
     application.run_polling()
 
-
-# ------------------------------
-# Entry Point
-# ------------------------------
 
 if __name__ == "__main__":
     main()
