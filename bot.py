@@ -193,6 +193,16 @@ async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ Character **{character_name}** uploaded successfully!")
 
 
+async def currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show top players by balance."""
+    leaderboard = Game.get_user_currency()
+    leaderboard_text = "\n".join(
+        f"{i+1}. {user.get('first_name', 'Unknown')} - 💰 {user.get('balance', 0)}"
+        for i, user in enumerate(leaderboard)
+    )
+    await update.message.reply_text(f"🏆 **Top Players:**\n{leaderboard_text}")
+
+
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show bot statistics."""
     total_users, total_characters = Game.get_bot_stats()
@@ -202,6 +212,11 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🎭 **Total Characters:** {total_characters}",
         parse_mode=ParseMode.MARKDOWN,
     )
+
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Broadcast a message to all users."""
+    for user in users_collection.find({}, {"user_id": 1}):
+        await context.bot.send_message(user['user_id'], "Broadcast Message")
 
 
 # ------------------------------
@@ -214,7 +229,7 @@ def main():
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("upload", upload))
     application.add_handler(CommandHandler("currency", currency))
-    application.add_handler(CommandHandler("addsudo", addsudo))
+    application.add_handler(CommandHandler("addsudo", Game.add_sudo_user))
     application.add_handler(CommandHandler("broadcast", broadcast))
     application.add_handler(CommandHandler("stats", stats))
     application.run_polling()
