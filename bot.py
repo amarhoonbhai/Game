@@ -211,6 +211,15 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    leaderboard = Game.get_user_currency()
+    leaderboard_text = "\n".join(
+        f"{i+1}. {user.get('first_name', 'Unknown')} - 💰 {user.get('balance', 0)}"
+        for i, user in enumerate(leaderboard)
+    )
+    await update.message.reply_text(f"🏆 **Top Players:**\n{leaderboard_text}")
+
+
 # ------------------------------
 # Main Function
 # ------------------------------
@@ -224,14 +233,9 @@ def main():
     application.add_handler(CommandHandler("currency", currency))
     application.add_handler(CommandHandler("addsudo", addsudo))
     application.add_handler(CommandHandler("stats", stats))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
 
     application.run_polling()
 
-
-# ------------------------------
-# Entry Point
-# ------------------------------
 
 if __name__ == "__main__":
     main()
