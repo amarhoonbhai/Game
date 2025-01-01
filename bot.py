@@ -4,72 +4,51 @@ import logging
 from collections import Counter
 from dotenv import load_dotenv
 from pymongo import MongoClient
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    filters,
-    ContextTypes,
+    Application, CommandHandler, MessageHandler,
+    filters, ContextTypes
 )
 
-# ------------------------------
-# Environment Setup
-# ------------------------------
-
+# --- 🛠️ Environment Setup ---
 load_dotenv()
-
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID = int(os.getenv("OWNER_ID"))
 MONGO_URI = os.getenv("MONGO_URI")
 CHARACTER_CHANNEL_ID = -1002438449944  # Replace with your channel ID
 
-# ------------------------------
-# Database Setup
-# ------------------------------
-
+# --- 💾 MongoDB Setup ---
 client = MongoClient(MONGO_URI)
 db = client["anime_bot"]
 users_collection = db["users"]
 characters_collection = db["characters"]
 sudo_users_collection = db["sudo_users"]
 
-# ------------------------------
-# Constants
-# ------------------------------
-
-RARITIES = [
-    ("Common 🌱", 60),
-    ("Uncommon 🌟", 20),
-    ("Rare 🌠", 10),
-    ("Epic 🌌", 5),
-    ("Legendary 🏆", 3),
-    ("Mythical 🔥", 2),
-]
-
-# ------------------------------
-# Logging Setup
-# ------------------------------
-
+# --- 📝 Logging Configuration ---
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
 
-# ------------------------------
-# Global Variables
-# ------------------------------
-
+# --- 🎮 Game State ---
 character_cache = []
 current_character = None
 user_message_count = Counter()
 
-# ------------------------------
-# Game Class
-# ------------------------------
+# --- 🌟 Rarities ---
+RARITIES = [
+    ("🌱 Common", 60),
+    ("🌿 Uncommon", 20),
+    ("🌟 Rare", 10),
+    ("🪄 Epic", 5),
+    ("🏆 Legendary", 3),
+    ("🔥 Mythical", 2),
+]
 
+
+# --- 🧠 Game Logic ---
 class Game:
     """Encapsulates game logic and utility methods."""
 
@@ -82,15 +61,13 @@ class Game:
             cumulative += weight
             if choice <= cumulative:
                 return rarity
-        return "Common 🌱"
+        return "🌱 Common"
 
     @staticmethod
     def fetch_random_character():
         global character_cache
         if not character_cache:
-            character_cache = list(
-                characters_collection.aggregate([{"$sample": {"size": 10}}])
-            )
+            character_cache = list(characters_collection.aggregate([{"$sample": {"size": 10}}]))
         return character_cache.pop() if character_cache else None
 
     @staticmethod
@@ -102,22 +79,20 @@ class Game:
                 balance_increment = 10 + (new_streak * 2)
                 users_collection.update_one(
                     {"user_id": user_id},
-                    {"$inc": {"balance": balance_increment}, "$set": {"streak": new_streak}},
+                    {"$inc": {"balance": balance_increment}, "$set": {"streak": new_streak}}
                 )
                 return balance_increment, new_streak
             else:
                 users_collection.update_one({"user_id": user_id}, {"$set": {"streak": 0}})
                 return 0, 0
         else:
-            users_collection.insert_one(
-                {
-                    "user_id": user_id,
-                    "first_name": first_name,
-                    "last_name": last_name,
-                    "balance": 0,
-                    "streak": 0,
-                }
-            )
+            users_collection.insert_one({
+                "user_id": user_id,
+                "first_name": first_name,
+                "last_name": last_name,
+                "balance": 0,
+                "streak": 0
+            })
             return 0, 0
 
     @staticmethod
@@ -138,100 +113,78 @@ class Game:
         total_characters = characters_collection.count_documents({})
         return total_users, total_characters
 
-# ------------------------------
-# Command Handlers
-# ------------------------------
+    @staticmethod
+    def broadcast_message(bot, message):
+        for user in users_collection.find({}, {"user_id": 1}):
+            try:
+                bot.send_message(
+                    chat_id=user["user_id"],
+                    text=message,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except Exception as e:
+                logger.error(f"Broadcast error to {user['user_id']}: {e}")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start the bot and show game instructions."""
-    await update.message.reply_text(
-        "🎮 **Welcome to the Anime Guessing Bot!** 🎮\n\n"
-        "🕹️ **How to Play:**\n"
-        "➤ A random anime character will be shown.\n"
-        "➤ Guess their name to earn rewards!\n\n"
-        "💰 **Rewards:**\n"
-        "➤ Earn $10 for each correct guess.\n"
-        "➤ Get bonus rewards for streaks!\n\n"
-        "🔥 **Let's start the game! Good luck!** 🔥",
+
+# --- 🕹️ Handlers ---
+async def show_random_character(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
+    global current_character
+    current_character = Game.fetch_random_character()
+    if not current_character:
+        current_character = {
+            "name": "Unknown",
+            "rarity": "Unknown",
+            "image_url": "https://via.placeholder.com/500"
+        }
+    await context.bot.send_photo(
+        chat_id=chat_id,
+        photo=current_character["image_url"],
+        caption=(
+            f"🎭 **Guess the Character!** 🎭\n\n"
+            f"⭐ **Rarity:** {current_character['rarity']}\n"
+            "💬 **Type your guess below!**"
+        ),
         parse_mode=ParseMode.MARKDOWN,
     )
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("🧑‍💻 Dev Profile", url="https://t.me/PhiloWise")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "🎮 **Welcome to Anime Guessing Bot!** 🎮\n"
+        "🧠 Guess anime characters to earn rewards!\n"
+        "🔥 **Let's start playing!**",
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN
+    )
+    await show_random_character(context, update.effective_chat.id)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Display the help menu."""
     await update.message.reply_text(
-        "📚 **Bot Commands:** 📚\n"
-        "/start - Start the game\n"
-        "/help - Show this help message\n"
-        "/upload - Upload a new character (Admin Only)\n"
-        "/currency - Show top players by balance\n"
-        "/addsudo - Add a sudo user (Owner Only)\n"
-        "/broadcast - Broadcast a message (Owner Only)\n"
-        "/stats - Show bot statistics",
-        parse_mode=ParseMode.MARKDOWN,
+        "🛠️ **Available Commands:**\n"
+        "/start - Start the bot\n"
+        "/help - Show all commands\n"
+        "/profile - Show your profile\n"
+        "/stats - Show bot statistics (Owner only)\n"
+        "/currency - View top players\n"
+        "/upload - Add a new character (Admin only)\n"
+        "/addsudo - Add sudo user (Owner only)\n"
+        "/broadcast - Broadcast a message (Owner only)\n"
+        "💬 **Simply type to guess a character!**"
     )
 
 
-async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Upload a new character."""
-    user_id = update.effective_user.id
-    if not (Game.is_owner(user_id) or sudo_users_collection.find_one({"user_id": user_id})):
-        await update.message.reply_text("❌ Unauthorized.", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    if len(context.args) < 2:
-        await update.message.reply_text("⚠️ Usage: /upload <image_url> <character_name>")
-        return
-
-    image_url, character_name = context.args[0], " ".join(context.args[1:])
-    rarity = Game.assign_rarity()
-    characters_collection.insert_one({
-        "name": character_name,
-        "rarity": rarity,
-        "image_url": image_url,
-    })
-    await update.message.reply_text(f"✅ Character **{character_name}** uploaded successfully!")
-
-
-async def currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show top players by balance."""
-    leaderboard = Game.get_user_currency()
-    leaderboard_text = "\n".join(
-        f"{i+1}. {user.get('first_name', 'Unknown')} - 💰 {user.get('balance', 0)}"
-        for i, user in enumerate(leaderboard)
-    )
-    await update.message.reply_text(f"🏆 **Top Players:**\n{leaderboard_text}")
-
-
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show bot statistics."""
-    total_users, total_characters = Game.get_bot_stats()
-    await update.message.reply_text(
-        f"📊 **Bot Statistics:**\n"
-        f"👥 **Total Users:** {total_users}\n"
-        f"🎭 **Total Characters:** {total_characters}",
-        parse_mode=ParseMode.MARKDOWN,
-    )
-
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Broadcast a message to all users."""
-    for user in users_collection.find({}, {"user_id": 1}):
-        await context.bot.send_message(user['user_id'], "Broadcast Message")
-
-
-# ------------------------------
-# Main Function
-# ------------------------------
-
+# --- 🚀 Main Application ---
 def main():
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("upload", upload))
-    application.add_handler(CommandHandler("currency", currency))
-    application.add_handler(CommandHandler("addsudo", Game.add_sudo_user))
-    application.add_handler(CommandHandler("broadcast", broadcast))
     application.add_handler(CommandHandler("stats", stats))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, show_random_character))
     application.run_polling()
 
 
