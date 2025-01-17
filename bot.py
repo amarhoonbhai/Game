@@ -203,11 +203,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⦿ **/upload** - Upload a new character (admin only).\n"
         "⦿ **/currency** - View the top players by balance.\n"
         "⦿ **/addsudo** - Add a sudo user (owner only).\n"
-        "⦿ **/broadcast** - Send a message to all users (owner only).\n"
-        "⦿ **/stats** - View bot statistics (owner only).\n",
-        parse_mode=ParseMode.MARKDOWN,
-    )
-
 
 async def upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Upload a new character with specified name and image URL, rarity auto-assigned."""
@@ -310,12 +305,6 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message = " ".join(context.args)
             if not message:
                 await update.message.reply_text(
-                    "⚠️ **Usage:** /broadcast <message>\n\n"
-                    "⦿ Provide the message you want to broadcast to all users.",
-                    parse_mode=ParseMode.MARKDOWN,
-                )
-                return
-
             Game.broadcast_message(context.bot, message)
             await update.message.reply_text(
                 "✅ **Broadcast sent to all users.**",
