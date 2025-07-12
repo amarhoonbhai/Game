@@ -390,7 +390,7 @@ async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # Register the chat tracking handler
-tapplication.add_handler(MessageHandler(filters.ALL, track_chats))
+application.add_handler(MessageHandler(filters.ALL, track_chats))
 
 # --- Updated Chat Tracking with Group Activity ---
 
